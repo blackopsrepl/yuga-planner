@@ -1,2 +1,8 @@
+pytest
+pytest-asyncio
+python-dotenv
 gradio
 gradio[mcp]
+llama-index-core
+llama-index-utils-workflow
+llama-index-llms-nebius

@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 from itertools import product
-from enum import Enum
+
 from random import Random
 from dataclasses import dataclass, field
 
@@ -10,11 +10,13 @@ from constraint_solvers.timetable.domain import *
 # =========================
 #        CONSTANTS
 # =========================
-SLOTS_PER_DAY = 16  # 8 hours * 2 slots per hour
+
+# Each slot is 30 minutes
+SLOTS_PER_DAY = 16
 
 ### TASKS ###
 DEMO_TASKS = [
-    ("Install Windows", 3),
+    ("Install Operating System", 3),
     ("Configure Network", 2),
     ("Setup Database", 4),
     ("Install Software", 2),
@@ -82,35 +84,31 @@ LARGE_DEMO_PARAMS = DemoDataParameters(
     random_seed=37,
 )
 
-# =========================
-#     UTILITY FUNCTIONS
-# =========================
-def counts(distributions: tuple[CountDistribution, ...]) -> tuple[int, ...]:
+
+def generate_demo_data() -> EmployeeSchedule:
     """
-    Extracts the count values from a tuple of CountDistribution objects.
+    Generates demo employee schedule data using the LARGE demo parameters.
+
+    TODO: allow to choose data from TaskComposerAgent
     """
-    return tuple(distribution.count for distribution in distributions)
+    parameters: DemoDataParameters = LARGE_DEMO_PARAMS
+    start_date: date = earliest_monday_on_or_after(date.today())
+    random: Random = Random(parameters.random_seed)
+    employees: list[Employee] = generate_employees(parameters, random)
+    tasks: list[Task] = []
+    total_slots: int = parameters.days_in_schedule * SLOTS_PER_DAY
+
+    tasks = generate_tasks(parameters, random)
+
+    generate_employee_availability(employees, parameters, start_date, random)
+
+    return EmployeeSchedule(
+        employees=employees,
+        tasks=tasks,
+        schedule_info=ScheduleInfo(total_slots=total_slots),
+    )
 
 
-def weights(distributions: tuple[CountDistribution, ...]) -> tuple[float, ...]:
-    """
-    Extracts the weight values from a tuple of CountDistribution objects.
-    """
-    return tuple(distribution.weight for distribution in distributions)
-
-
-def earliest_monday_on_or_after(target_date: date) -> date:
-    """
-    Returns the date of the next Monday on or after the given date.
-    If the date is already Monday, returns the same date.
-    """
-    days = (7 - target_date.weekday()) % 7
-    return target_date + timedelta(days=days)
-
-
-# =========================
-#   MAIN GENERATION LOGIC
-# =========================
 def generate_employees(
     parameters: DemoDataParameters, random: Random
 ) -> list[Employee]:
@@ -135,25 +133,17 @@ def generate_employees(
     return employees
 
 
-def generate_demo_data() -> EmployeeSchedule:
+def generate_employee_availability(
+    employees: list[Employee],
+    parameters: DemoDataParameters,
+    start_date: date,
+    random: Random,
+) -> None:
     """
-    Generates demo employee schedule data using the LARGE demo parameters.
+    Sets up random availability preferences for employees across the schedule period.
+    For each day, randomly selects a number of employees and assigns them random
+    availability preferences (unavailable, undesired, or desired).
     """
-    parameters = LARGE_DEMO_PARAMS
-    start_date = earliest_monday_on_or_after(date.today())
-    random = Random(parameters.random_seed)
-    employees = generate_employees(parameters, random)
-    tasks: list[Task] = []
-    total_slots = parameters.days_in_schedule * SLOTS_PER_DAY
-
-    def id_generator():
-        current_id = 0
-        while True:
-            yield str(current_id)
-            current_id += 1
-
-    ids = id_generator()
-    # Set up employee availability
     for i in range(parameters.days_in_schedule):
         (count,) = random.choices(
             population=counts(parameters.availability_count_distribution),
@@ -169,6 +159,16 @@ def generate_demo_data() -> EmployeeSchedule:
                 employee.undesired_dates.add(current_date)
             elif rand_num == 2:
                 employee.desired_dates.add(current_date)
+
+
+def generate_tasks(parameters: DemoDataParameters, random: Random) -> list[Task]:
+    """
+    Generates a list of Task objects with random descriptions and durations.
+    """
+    tasks: list[Task] = []
+
+    ids = generate_task_ids()
+
     # Create tasks
     for description, duration in DEMO_TASKS:
         if random.random() >= 0.5:
@@ -184,8 +184,37 @@ def generate_demo_data() -> EmployeeSchedule:
                 required_skill=required_skill,
             )
         )
-    return EmployeeSchedule(
-        employees=employees,
-        tasks=tasks,
-        schedule_info=ScheduleInfo(total_slots=total_slots),
-    )
+    return tasks
+
+
+def generate_task_ids():
+    current_id = 0
+    while True:
+        yield str(current_id)
+        current_id += 1
+
+
+# =========================
+#     UTILITY FUNCTIONS
+# =========================
+def counts(distributions: tuple[CountDistribution, ...]) -> tuple[int, ...]:
+    """
+    Extracts the count values from a tuple of CountDistribution objects.
+    """
+    return tuple(distribution.count for distribution in distributions)
+
+
+def weights(distributions: tuple[CountDistribution, ...]) -> tuple[float, ...]:
+    """
+    Extracts the weight values from a tuple of CountDistribution objects.
+    """
+    return tuple(distribution.weight for distribution in distributions)
+
+
+def earliest_monday_on_or_after(target_date: date) -> date:
+    """
+    Returns the date of the next Monday on or after the given date.
+    If the date is already Monday, returns the same date.
+    """
+    days = (7 - target_date.weekday()) % 7
+    return target_date + timedelta(days=days)

@@ -1,25 +1,195 @@
+### GENERAL IMPORTS ###
+import pandas as pd
+import uuid
+from datetime import datetime, timedelta
+
+### GRADIO ###
 import gradio as gr
 
+### TIMETABLE SOLVER ###
+from generate_demo_data import generate_demo_data
+from constraint_solvers.timetable.solver import solver_manager
 
-def letter_counter(word, letter):
-    """Count the occurrences of a specific letter in a word.
+solved_schedules = {}
+
+### APP ###
+def app():
+    with gr.Blocks() as demo:
+        gr.Markdown(
+            "# Employee Task Scheduling Demo\nView or solve the schedule for the LARGE demo dataset."
+        )
+
+        ### UI ELEMENTS ###
+        with gr.Row():
+            show_btn = gr.Button("Show Unsolved")
+            solve_btn = gr.Button("Solve")
+
+        ### TABLES ###
+        gr.Markdown("## Employees")
+        employees_table = gr.Dataframe(label="Employees", interactive=False)
+
+        gr.Markdown("## Tasks")
+        schedule_table = gr.Dataframe(label="Tasks Table", interactive=False)
+
+        ### STATE ###
+        job_id_state = gr.State(value=None)
+
+        status_text = gr.Textbox(label="Solver Status", interactive=False)
+
+        ### EVENT FUNCTIONS ###
+        def show_unsolved() -> tuple[pd.DataFrame, pd.DataFrame, None, str]:
+            emp_df, task_df, _, _ = generate_tables()
+            return emp_df, task_df, None, ""
+
+        def show_solved() -> tuple[pd.DataFrame, pd.DataFrame, str, str]:
+            emp_df, task_df, job_id, status = solve_schedule()
+            return emp_df, task_df, job_id, status
+
+        show_btn.click(
+            show_unsolved,
+            inputs=[],
+            outputs=[employees_table, schedule_table, job_id_state, status_text],
+        )
+
+        solve_btn.click(
+            show_solved,
+            inputs=[],
+            outputs=[employees_table, schedule_table, job_id_state, status_text],
+        )
+
+        def auto_poll(job_id) -> tuple[pd.DataFrame, pd.DataFrame, str, str]:
+            if job_id:
+                return poll_solution(job_id)
+            return None, None, job_id, ""
+
+        demo.load(
+            show_unsolved,
+            inputs=[],
+            outputs=[employees_table, schedule_table, job_id_state, status_text],
+        )
+
+        timer = gr.Timer(2)
+
+        timer.tick(
+            auto_poll,
+            inputs=job_id_state,
+            outputs=[employees_table, schedule_table, job_id_state, status_text],
+        )
+
+    return demo
+
+
+### HELPER FUNCTIONS ###
+def schedule_to_dataframe(schedule) -> pd.DataFrame:
+    """
+    Convert an EmployeeSchedule to a pandas DataFrame.
 
     Args:
-        word: The word or phrase to analyze
-        letter: The letter to count occurrences of
+        schedule (EmployeeSchedule): The schedule to convert.
 
     Returns:
-        The number of times the letter appears in the word
+        pd.DataFrame: The converted DataFrame.
     """
-    return word.lower().count(letter.lower())
+    data = []
+    for task in schedule.tasks:
+        employee = task.employee.name if task.employee else "Unassigned"
+        start_time = datetime.now() + timedelta(minutes=30 * task.start_slot)
+        end_time = start_time + timedelta(minutes=30 * task.duration_slots)
+        data.append(
+            {
+                "Employee": employee,
+                "Task": task.description,
+                "Start": start_time,
+                "End": end_time,
+                "Duration (hours)": task.duration_slots / 2,  # Convert slots to hours
+                "Required Skill": task.required_skill,
+                "Unavailable": employee != "Unassigned"
+                and hasattr(task.employee, "unavailable_dates")
+                and start_time.date() in task.employee.unavailable_dates,
+                "Undesired": employee != "Unassigned"
+                and hasattr(task.employee, "undesired_dates")
+                and start_time.date() in task.employee.undesired_dates,
+                "Desired": employee != "Unassigned"
+                and hasattr(task.employee, "desired_dates")
+                and start_time.date() in task.employee.desired_dates,
+            }
+        )
+    return pd.DataFrame(data)
 
 
-demo = gr.Interface(
-    fn=letter_counter,
-    inputs=["text", "text"],
-    outputs="number",
-    title="Letter Counter",
-    description="Count how many times a letter appears in a word",
-)
+def employees_to_dataframe(schedule) -> pd.DataFrame:
+    """
+    Convert an EmployeeSchedule to a pandas DataFrame.
 
-demo.launch(mcp_server=True)
+    Args:
+        schedule (EmployeeSchedule): The schedule to convert."""
+    data = []
+    for emp in schedule.employees:
+        first, last = emp.name.split(" ", 1) if " " in emp.name else (emp.name, "")
+        data.append(
+            {
+                "First Name": first,
+                "Last Name": last,
+                "Skills": ", ".join(sorted(emp.skills)),
+            }
+        )
+    return pd.DataFrame(data)
+
+
+def generate_tables() -> tuple[pd.DataFrame, pd.DataFrame, None, None]:
+    schedule = generate_demo_data()
+    emp_df = employees_to_dataframe(schedule)
+    task_df = schedule_to_dataframe(schedule)
+    task_df = task_df[
+        ["Employee", "Task", "Start", "End", "Duration (hours)", "Required Skill"]
+    ].sort_values(["Employee", "Start"])
+    return emp_df, task_df, None, None
+
+
+def solve_schedule() -> tuple[pd.DataFrame, pd.DataFrame, str, str]:
+    schedule = generate_demo_data()
+    job_id = str(uuid.uuid4())
+
+    # Start solving asynchronously
+    def listener(solution):
+        solved_schedules[job_id] = solution
+
+    solver_manager.solve_and_listen(job_id, schedule, listener)
+
+    emp_df = employees_to_dataframe(schedule)
+    task_df = schedule_to_dataframe(schedule)
+
+    task_df = task_df[
+        ["Employee", "Task", "Start", "End", "Duration (hours)", "Required Skill"]
+    ].sort_values(["Employee", "Start"])
+
+    return emp_df, task_df, job_id, "Solving..."
+
+
+def poll_solution(job_id) -> tuple[pd.DataFrame, pd.DataFrame, str, str]:
+    """
+    Poll for a solution for a given job_id.
+
+    Args:
+        job_id (str): The job_id to poll for.
+
+    Returns:
+        tuple[pd.DataFrame, pd.DataFrame, str, str]: The solved schedule.
+    """
+    if job_id and job_id in solved_schedules:
+        solved_schedule = solved_schedules[job_id]
+
+        emp_df = employees_to_dataframe(solved_schedule)
+        task_df = schedule_to_dataframe(solved_schedule)
+
+        task_df = task_df[
+            ["Employee", "Task", "Start", "End", "Duration (hours)", "Required Skill"]
+        ].sort_values(["Employee", "Start"])
+
+        return emp_df, task_df, job_id, "Solved!"
+
+    return None, None, job_id, "Solving..."
+
+
+if __name__ == "__main__":
+    app().launch()

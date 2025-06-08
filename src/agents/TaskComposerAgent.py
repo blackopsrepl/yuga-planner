@@ -151,8 +151,6 @@ class TaskComposerWorkflow(Workflow):
 
 
 ### SUMMARY LOGGING FUNCTIONS ###
-
-
 def log_task_duration_breakdown(merged_tasks):
     logger.info("Task duration breakdown:")
     for task, duration in merged_tasks:

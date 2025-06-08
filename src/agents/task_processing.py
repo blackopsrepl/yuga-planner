@@ -1,35 +1,7 @@
-import os, logging
+import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-### SECRETS ###
-def load_secrets(secrets_file: str):
-    """
-    Load secrets from Python file into environment variables.
-
-    Args:
-        secrets_file (str): Path to the Python file containing secrets
-
-    Returns:
-        bool: True if secrets were loaded successfully
-    """
-    try:
-        # Import secrets from the specified file
-        import importlib.util
-
-        spec = importlib.util.spec_from_file_location("secrets", secrets_file)
-        secrets = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(secrets)
-
-        # Set environment variables
-        os.environ["NEBIUS_API_KEY"] = secrets.NEBIUS_API_KEY
-        os.environ["NEBIUS_MODEL"] = secrets.NEBIUS_MODEL
-        return True
-
-    except Exception as e:
-        logger.error(f"Failed to load secrets from {secrets_file}: {str(e)}")
-        return False
 
 
 ### MARKDOWN UTILS ###
@@ -100,6 +72,13 @@ def log_task_duration_breakdown(merged_tasks: list[tuple[str, str]]) -> None:
         logger.info(f"- {task}: {duration} units")
 
 
+def safe_int(val):
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return 0
+
+
 def log_total_time(merged_tasks: list[tuple[str, str]]) -> None:
     """
     Log the total estimated time for all tasks.
@@ -107,7 +86,7 @@ def log_total_time(merged_tasks: list[tuple[str, str]]) -> None:
     Args:
         merged_tasks (list[tuple[str, str]]): List of (task, duration) tuples
     """
-    total_time = sum(int(time) for _, time in merged_tasks)
+    total_time = sum(safe_int(time) for _, time in merged_tasks)
 
     logger.info("Estimated time:")
     logger.info(f"{total_time} units (30 minutes each)")

@@ -11,8 +11,8 @@ from llama_index.core.workflow import (
     Event,
 )
 
-from src.utils.markdown_analyzer import MarkdownAnalyzer
-from src.utils.general_utils import (
+from utils.markdown_analyzer import MarkdownAnalyzer
+from agents.task_processing import (
     remove_markdown_code_blocks,
     unwrap_tasks_from_generated,
     log_task_duration_breakdown,
@@ -148,16 +148,3 @@ class TaskComposerWorkflow(Workflow):
         log_task_duration_breakdown(event.task_evaluator_output)
         log_total_time(event.task_evaluator_output)
         return StopEvent(result=event.task_evaluator_output)
-
-
-### SUMMARY LOGGING FUNCTIONS ###
-def log_task_duration_breakdown(merged_tasks):
-    logger.info("Task duration breakdown:")
-    for task, duration in merged_tasks:
-        logger.info(f"- {task}: {duration} units")
-
-
-def log_total_time(merged_tasks):
-    total_time = sum(int(time) for _, time in merged_tasks)
-    logger.info("Estimated time:")
-    logger.info(f"{total_time} units (30 minutes each)")

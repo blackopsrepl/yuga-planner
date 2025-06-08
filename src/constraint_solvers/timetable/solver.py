@@ -10,7 +10,7 @@ from .domain import *
 from .constraints import define_constraints
 
 
-solver_config = SolverConfig(
+solver_config: SolverConfig = SolverConfig(
     solution_class=EmployeeSchedule,
     entity_class_list=[Task],
     score_director_factory_config=ScoreDirectorFactoryConfig(
@@ -19,5 +19,7 @@ solver_config = SolverConfig(
     termination_config=TerminationConfig(spent_limit=Duration(seconds=30)),
 )
 
-solver_manager = SolverManager.create(SolverFactory.create(solver_config))
-solution_manager = SolutionManager.create(solver_manager)
+solver_manager: SolverManager = SolverManager.create(
+    SolverFactory.create(solver_config)
+)
+solution_manager: SolutionManager = SolutionManager.create(solver_manager)

@@ -14,13 +14,14 @@ from llama_index.core.workflow import (
 from utils.markdown_analyzer import MarkdownAnalyzer
 from agents.task_processing import (
     remove_markdown_code_blocks,
+    remove_markdown_list_elements,
     unwrap_tasks_from_generated,
     log_task_duration_breakdown,
     log_total_time,
 )
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 ### MODEL SETTINGS ###
 NEBIUS_API_KEY: str = os.getenv("NEBIUS_API_KEY", "")
@@ -60,7 +61,7 @@ class TaskComposerAgent:
         )
 
     def set_prompt_templates(self) -> None:
-        input_map = {"query_str": "query"}
+        input_map: dict[str, str] = {"query_str": "query"}
         self.task_splitter_template = RichPromptTemplate(
             TASK_SPLITTER_PROMPT, template_var_mappings=input_map
         )
@@ -78,8 +79,7 @@ class TaskComposerAgent:
         )
 
     async def run_workflow(self, query: str) -> str:
-        result = await self.workflow.run(input=query)
-        return result
+        return await self.workflow.run(input=query)
 
 
 class TaskSplitter(Event):
@@ -108,13 +108,15 @@ class TaskComposerWorkflow(Workflow):
         logger.info("=== Step 1: Task Breakdown ===")
         logger.info(f"Input task: {event.input}")
 
-        formatted_prompt = self._task_splitter_template.format(query=event.input)
+        formatted_prompt: str = self._task_splitter_template.format(query=event.input)
+
         response = await asyncio.wait_for(
             asyncio.to_thread(self._llm.complete, formatted_prompt), timeout=30.0
         )
 
         logger.info("Task breakdown:")
         logger.info(response.text)
+
         return TaskSplitter(task_splitter_output=response.text)
 
     @step
@@ -123,20 +125,22 @@ class TaskComposerWorkflow(Workflow):
         logger.info("Using task breakdown from Step 1:")
         logger.info(event.task_splitter_output)
 
-        content = remove_markdown_code_blocks(event.task_splitter_output)
+        content: str = remove_markdown_code_blocks(event.task_splitter_output)
+        analyzer: MarkdownAnalyzer = MarkdownAnalyzer(content)
+        result: list = analyzer.identify_lists()["Unordered list"]
+        tasks: list[str] = unwrap_tasks_from_generated(result)
 
-        analyzer = MarkdownAnalyzer(content)
-        result = analyzer.identify_lists()["Unordered list"]
-        tasks = unwrap_tasks_from_generated(result)
-
-        merged_tasks = []
+        merged_tasks: list[tuple[str, str]] = []
         for task in tasks:
-            formatted_prompt = self._task_evaluator_template.format(query=task)
+            formatted_prompt: str = self._task_evaluator_template.format(query=task)
+
             response = await asyncio.wait_for(
                 asyncio.to_thread(self._llm.complete, formatted_prompt), timeout=30.0
             )
             merged_tasks.append((task, response.text))
 
+        # remove markdown list elements wrapped in **
+        merged_tasks = remove_markdown_list_elements(merged_tasks)
         log_task_duration_breakdown(merged_tasks)
         log_total_time(merged_tasks)
 

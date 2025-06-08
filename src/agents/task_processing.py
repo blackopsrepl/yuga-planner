@@ -1,4 +1,6 @@
-import logging
+import re, logging
+
+from utils.markdown_analyzer import MarkdownAnalyzer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -24,6 +26,55 @@ def remove_markdown_code_blocks(text: str) -> str:
         content = content[:-3]  # Remove ```
 
     return content.strip()
+
+
+def remove_markdown_list_headers(
+    merged_tasks: list[tuple[str, str]]
+) -> list[tuple[str, str]]:
+    """
+    Remove list headers (e.g. **element**) from task descriptions.
+
+    Args:
+        merged_tasks (list[tuple[str, str]]): List of (task, duration) tuples
+
+    Returns:
+        list[tuple[str, str]]: List of (task, duration) tuples with headers removed
+    """
+    cleaned_tasks: list[tuple[str, str]] = []
+
+    for task, duration in merged_tasks:
+        # Use MarkdownAnalyzer to parse and clean the task text
+        analyzer: MarkdownAnalyzer = MarkdownAnalyzer(task)
+
+        # Get the text content without any markdown formatting
+        cleaned_task: str = analyzer.text.strip()
+        cleaned_tasks.append((cleaned_task, duration))
+
+    return cleaned_tasks
+
+
+def remove_markdown_list_elements(
+    merged_tasks: list[tuple[str, str]]
+) -> list[tuple[str, str]]:
+    """
+    Remove markdown list elements that start and end with ** from task descriptions.
+    If a task is entirely wrapped in **, remove the entire task.
+
+    Args:
+        merged_tasks (list[tuple[str, str]]): List of (task, duration) tuples
+
+    Returns:
+        list[tuple[str, str]]: List of (task, duration) tuples with markdown list elements removed
+    """
+    cleaned_tasks = []
+    for task, duration in merged_tasks:
+        # Skip tasks that are wrapped in **
+        if task.strip().startswith("**") or task.strip().endswith("**"):
+            continue
+
+        cleaned_tasks.append((task, duration))
+
+    return cleaned_tasks
 
 
 def unwrap_tasks_from_generated(result: list) -> list:

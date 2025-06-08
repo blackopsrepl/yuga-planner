@@ -22,10 +22,10 @@ def get_slot_overlap(task1: Task, task2: Task) -> int:
     Returns:
         int: The number of overlapping slots.
     """
-    task1_end = task1.start_slot + task1.duration_slots
-    task2_end = task2.start_slot + task2.duration_slots
-    overlap_start = max(task1.start_slot, task2.start_slot)
-    overlap_end = min(task1_end, task2_end)
+    task1_end: int = task1.start_slot + task1.duration_slots
+    task2_end: int = task2.start_slot + task2.duration_slots
+    overlap_start: int = max(task1.start_slot, task2.start_slot)
+    overlap_end: int = min(task1_end, task2_end)
     return max(0, overlap_end - overlap_start)
 
 
@@ -51,9 +51,6 @@ def define_constraints(constraint_factory: ConstraintFactory) -> list:
 
     Returns:
         list[Constraint]: The constraints.
-
-    TODO: Add docstrings to each constraint
-    TODO: Refactor to Dataclass
     """
     return [
         # Hard constraints

@@ -1,6 +1,6 @@
 import pytest, logging
 
-from src.utils.general_utils import load_secrets
+from utils.agent_utils import load_secrets
 
 # Load environment variables
 print("\n=== Test Environment ===")

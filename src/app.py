@@ -45,13 +45,23 @@ DEBUG: bool = False
 
 def app():
     with gr.Blocks() as demo:
-        gr.Markdown("# SWE Team Task Scheduling Demo")
+        gr.Markdown(
+            """
+            # Yuga Planner
+            Yuga Planner is a neuro-symbolic system prototype: it provides an agent-powered team scheduling and task allocation platform build on [Gradio](https://gradio.app/).
+            """
+        )
+        gr.Markdown("### SWE Team Task Scheduling Demo")
 
         file_upload = gr.File(
             label="Upload Project File (Markdown)",
             file_types=[".md"],
             file_count="single",
             visible=True,
+        )
+
+        gr.Markdown(
+            "Upload a project description in Markdown format, click 'Load Data' to parse, decompose, and estimate tasks. Click 'Solve' to generate an optimal schedule."
         )
 
         # State for LLM output, persists per session

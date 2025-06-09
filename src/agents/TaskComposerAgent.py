@@ -151,4 +151,5 @@ class TaskComposerWorkflow(Workflow):
         logger.info("=== Step 3: Final Result ===")
         log_task_duration_breakdown(event.task_evaluator_output)
         log_total_time(event.task_evaluator_output)
+
         return StopEvent(result=event.task_evaluator_output)

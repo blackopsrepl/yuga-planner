@@ -55,8 +55,13 @@ It takes a project description file such as a README.md file, breaks it down int
 
 ### Work in Progress
 
-- **Skills matching:** (currently random, working on LLM-based skill matching)
-- **Task dependencies:** (currently random, working on task dependency detection system; may use LLMs or not)
+- **Skills matching:** currently random, working on LLM-based skill matching
+- **Task dependencies:** currently random, working on task dependency detection system; may use LLMs or not
+
+### Future Work
+
+- **Input from GitHub issues:** instead of processing markdown directly, it creates a list by parsing issues/comments
+- **Chat interface:** detection of user commands for CRUD operations on tasks and schedules
 
 ## Prerequisites (Local/GitHub)
 

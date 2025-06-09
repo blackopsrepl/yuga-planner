@@ -126,3 +126,5 @@ dmypy.json
 *.code-workspace
 
 tests/secrets/nebius_secrets.py
+
+tests/secrets/creds.py

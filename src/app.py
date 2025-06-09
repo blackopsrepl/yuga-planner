@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO)
 from utils.load_secrets import load_secrets
 
 if not os.getenv("NEBIUS_API_KEY") or not os.getenv("NEBIUS_MODEL"):
-    load_secrets("tests/secrets/nebius_secrets.py")
+    load_secrets("tests/secrets/creds.py")
 
 # =========================
 #          GRADIO
@@ -28,6 +28,7 @@ from factory.data_provider import (
     generate_employees,
     generate_employee_availability,
 )
+
 
 from constraint_solvers.timetable.solver import solver_manager
 from constraint_solvers.timetable.domain import EmployeeSchedule, ScheduleInfo, Task

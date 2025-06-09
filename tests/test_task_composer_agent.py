@@ -1,12 +1,14 @@
 import pytest, logging
 
 
-from utils.load_secrets import load_secrets
+from src.utils.load_secrets import load_secrets
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+# Load environment variables
+load_secrets("tests/secrets/creds.py")
 # Import TaskComposerAgent after environment variables are set
 from src.agents.TaskComposerAgent import TaskComposerAgent
 
@@ -14,8 +16,6 @@ from src.agents.TaskComposerAgent import TaskComposerAgent
 @pytest.mark.asyncio
 async def test_task_composer_agent():
     logger.info("\n=== Test Environment ===")
-    # Load environment variables
-    load_secrets("tests/secrets/nebius_secrets.py")
 
     logger.info("\n=== Starting Test ===")
 

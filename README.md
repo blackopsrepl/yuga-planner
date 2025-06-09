@@ -60,8 +60,9 @@ It takes a project description file such as a README.md file, breaks it down int
 
 ### Future Work
 
-- **Input from GitHub issues:** instead of processing markdown directly, it creates a list by parsing issues/comments
+- **Input from GitHub issues:** instead of processing markdown directly, it creates a list by parsing issue
 - **Chat interface:** detection of user commands for CRUD operations on tasks and schedules
+- **Reinforcement learning:** training the agent to improve task decomposition and estimation from GitHub metrics (e.g. diffs in timestamps, issue comments etc.)
 
 ## Prerequisites (Local/GitHub)
 

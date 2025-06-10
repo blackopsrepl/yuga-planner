@@ -211,31 +211,61 @@ def generate_employee_availability(
     random: Random,
 ) -> None:
     """
-    Sets up random availability preferences for employees across the schedule period.
-    For each day, randomly selects a number of employees and assigns them random
-    availability preferences (unavailable, undesired, or desired).
+    Sets up random availability preferences for employees proportional to schedule length.
+
+    For 365 days:
+    - Max 21 unavailable days per employee
+    - Max 0-12 undesired days per employee
+    - Desired dates remain flexible (0-12 days)
+
+    Scales proportionally for different schedule lengths.
     """
-    for i in range(parameters.days_in_schedule):
-        (count,) = random.choices(
-            population=counts(parameters.availability_count_distribution),
-            weights=weights(parameters.availability_count_distribution),
+    days_in_schedule = parameters.days_in_schedule
+
+    # Calculate proportional limits based on 365-day baseline
+    max_unavailable_per_employee = round((21 / 365) * days_in_schedule)
+    max_undesired_per_employee = round((12 / 365) * days_in_schedule)
+    max_desired_per_employee = round((12 / 365) * days_in_schedule)
+
+    # Ensure minimum reasonable values
+    max_unavailable_per_employee = max(1, max_unavailable_per_employee)
+    max_undesired_per_employee = max(0, max_undesired_per_employee)
+    max_desired_per_employee = max(0, max_desired_per_employee)
+
+    # Generate all possible dates in the schedule
+    all_dates = [start_date + timedelta(days=i) for i in range(days_in_schedule)]
+
+    for employee in employees:
+        # Randomly assign unavailable dates (1 to max_unavailable_per_employee)
+        num_unavailable = random.randint(1, max_unavailable_per_employee)
+        unavailable_dates = random.sample(
+            all_dates, min(num_unavailable, len(all_dates))
         )
+        employee.unavailable_dates.update(unavailable_dates)
 
-        # Ensure we don't try to sample more employees than we have
-        count = min(count, len(employees))
+        # Remove unavailable dates from remaining pool for other preferences
+        remaining_dates = [d for d in all_dates if d not in employee.unavailable_dates]
 
-        employees_with_availabilities_on_day = random.sample(employees, count)
+        # Randomly assign undesired dates (0 to max_undesired_per_employee)
+        if max_undesired_per_employee > 0 and remaining_dates:
+            num_undesired = random.randint(
+                0, min(max_undesired_per_employee, len(remaining_dates))
+            )
+            if num_undesired > 0:
+                undesired_dates = random.sample(remaining_dates, num_undesired)
+                employee.undesired_dates.update(undesired_dates)
+                remaining_dates = [
+                    d for d in remaining_dates if d not in employee.undesired_dates
+                ]
 
-        current_date = start_date + timedelta(days=i)
-
-        for employee in employees_with_availabilities_on_day:
-            rand_num = random.randint(0, 2)
-            if rand_num == 0:
-                employee.unavailable_dates.add(current_date)
-            elif rand_num == 1:
-                employee.undesired_dates.add(current_date)
-            elif rand_num == 2:
-                employee.desired_dates.add(current_date)
+        # Randomly assign desired dates (0 to max_desired_per_employee)
+        if max_desired_per_employee > 0 and remaining_dates:
+            num_desired = random.randint(
+                0, min(max_desired_per_employee, len(remaining_dates))
+            )
+            if num_desired > 0:
+                desired_dates = random.sample(remaining_dates, num_desired)
+                employee.desired_dates.update(desired_dates)
 
 
 def generate_tasks(

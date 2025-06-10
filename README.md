@@ -17,6 +17,8 @@ Yuga Planner is a neuro-symbolic system prototype: it provides an agent-powered 
 
 It takes a project description file such as a README.md file, breaks it down into actionable tasks through a [LLamaIndex](https://www.llamaindex.ai/) agent, then uses [Timefold](http://www.timefold.ai) to generate optimal employee schedules for complex projects.
 
+**Demo Video:** [pCloud]()
+
 ## 🚀 Try It Now
 **Live Demo:**
 [https://huggingface.co/spaces/Agents-MCP-Hackathon/yuga-planner](https://huggingface.co/spaces/Agents-MCP-Hackathon/yuga-planner)

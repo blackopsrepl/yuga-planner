@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.2.0](///compare/v1.1.0...v1.2.0) (2025-06-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* add task to skill matching
+
+### Features
+
+* add task to skill matching 76af8db
+
 ## [1.1.0](///compare/v1.0.1...v1.1.0) (2025-06-10)
 
 

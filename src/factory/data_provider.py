@@ -80,7 +80,7 @@ DATA_PARAMS = TimeTableDataParameters(
 # =========================
 #        AGENT DATA
 # =========================
-async def generate_agent_data(file) -> EmployeeSchedule:
+async def generate_agent_data(file, project_id: str = "") -> EmployeeSchedule:
     """
     Generates an EmployeeSchedule using tasks from TaskComposerAgent output.
     """
@@ -108,7 +108,7 @@ async def generate_agent_data(file) -> EmployeeSchedule:
     # Run agent
     agent = TaskComposerAgent()
     agent_output = await agent.run_workflow(input_str)
-    tasks = tasks_from_agent_output(agent_output, parameters)
+    tasks = tasks_from_agent_output(agent_output, parameters, project_id)
     generate_employee_availability(employees, parameters, start_date, randomizer)
 
     return EmployeeSchedule(
@@ -238,7 +238,7 @@ def earliest_monday_on_or_after(target_date: date) -> date:
     return target_date + timedelta(days=days)
 
 
-def tasks_from_agent_output(agent_output, parameters):
+def tasks_from_agent_output(agent_output, parameters, project_id: str = ""):
     """
     Convert TaskComposerAgent output (list of (description, duration)) to Task objects.
     """
@@ -248,7 +248,7 @@ def tasks_from_agent_output(agent_output, parameters):
     tasks = []
     import random
 
-    for description, duration in agent_output:
+    for sequence_num, (description, duration) in enumerate(agent_output):
         try:
             duration_int = int(duration)
         except (ValueError, TypeError):
@@ -265,6 +265,8 @@ def tasks_from_agent_output(agent_output, parameters):
                 duration_slots=duration_int,
                 start_slot=0,
                 required_skill=required_skill,
+                project_id=project_id,
+                sequence_number=sequence_num,
             )
         )
     return tasks

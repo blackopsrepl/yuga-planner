@@ -1,5 +1,5 @@
 import os, asyncio, logging
-from typing import Optional
+from typing import Optional, List
 
 from llama_index.llms.nebius import NebiusLLM
 from llama_index.core.prompts import RichPromptTemplate
@@ -23,25 +23,17 @@ from agents.task_processing import (
 logging.basicConfig(level=logging.INFO)
 logger: logging.Logger = logging.getLogger(__name__)
 
-### MODEL SETTINGS ###
-NEBIUS_API_KEY: str = os.getenv("NEBIUS_API_KEY", "")
-NEBIUS_MODEL: str = os.getenv("NEBIUS_MODEL", "")
 
-if not NEBIUS_MODEL or not NEBIUS_API_KEY:
-    raise ValueError(
-        "NEBIUS_MODEL and NEBIUS_API_KEY environment variables must be set"
-    )
-
-### PROMPT TEMPLATES ###
-TASK_SPLITTER_PROMPT: str = "Split the following task into an accurate and concise tree of required subtasks:\n{{query}}\n\nYour output must be a markdown bullet list, with no additional comments.\n\n"
-TASK_EVALUATOR_PROMPT: str = "Evaluate the elapsed time, in 30 minute units, for a competent human to complete the following task:\n{{query}}\n\nYour output must be a one integer, with no additional comments.\n\n"
+from domain import AgentsConfig, AGENTS_CONFIG
 
 
 class TaskComposerAgent:
-    def __init__(self):
+    def __init__(self, config: AgentsConfig = AGENTS_CONFIG):
+        self.config = config
         self.llm: Optional[NebiusLLM] = None
         self.task_splitter_template: Optional[RichPromptTemplate] = None
         self.task_evaluator_template: Optional[RichPromptTemplate] = None
+        self.task_deps_matcher_template: Optional[RichPromptTemplate] = None
         self.workflow: Optional[TaskComposerWorkflow] = None
 
         self.set_llm()
@@ -50,23 +42,32 @@ class TaskComposerAgent:
 
     def set_llm(self) -> None:
         self.llm = NebiusLLM(
-            model=NEBIUS_MODEL,
-            api_key=NEBIUS_API_KEY,
-            timeout=30,
-            max_retries=3,
-            verify_ssl=True,
-            request_timeout=30,
-            max_tokens=1024,
-            temperature=0.1,
+            model=self.config.nebius_model,
+            api_key=self.config.nebius_api_key,
+            timeout=self.config.timeout,
+            max_retries=self.config.max_retries,
+            verify_ssl=self.config.verify_ssl,
+            request_timeout=self.config.request_timeout,
+            max_tokens=self.config.max_tokens,
+            temperature=self.config.temperature,
         )
 
     def set_prompt_templates(self) -> None:
-        input_map: dict[str, str] = {"query_str": "query"}
         self.task_splitter_template = RichPromptTemplate(
-            TASK_SPLITTER_PROMPT, template_var_mappings=input_map
+            self.config.task_splitter_prompt,
+            template_var_mappings={"query_str": "query"},
         )
         self.task_evaluator_template = RichPromptTemplate(
-            TASK_EVALUATOR_PROMPT, template_var_mappings=input_map
+            self.config.task_evaluator_prompt,
+            template_var_mappings={"query_str": "query"},
+        )
+        self.task_deps_matcher_template = RichPromptTemplate(
+            self.config.task_deps_matcher_prompt,
+            template_var_mappings={
+                "query_str": "task",
+                "skills_str": "skills",
+                "context_str": "context",
+            },
         )
 
     def set_workflow(self) -> None:
@@ -74,20 +75,35 @@ class TaskComposerAgent:
             llm=self.llm,
             task_splitter_template=self.task_splitter_template,
             task_evaluator_template=self.task_evaluator_template,
+            task_deps_matcher_template=self.task_deps_matcher_template,
             timeout=60,
             verbose=True,
         )
 
-    async def run_workflow(self, query: str) -> str:
-        return await self.workflow.run(input=query)
+    async def run_workflow(
+        self, query: str, skills: Optional[List[str]] = None, context: str = ""
+    ) -> str:
+        return await self.workflow.run(
+            input=query, skills=skills or [], context=context
+        )
 
 
 class TaskSplitter(Event):
     task_splitter_output: str
+    skills: List[str]
+    context: str
 
 
 class TaskEvaluator(Event):
     task_evaluator_output: list[tuple[str, str]]
+    skills: List[str]
+    context: str
+
+
+class TaskDependencyMatcher(Event):
+    task_dependency_output: list[
+        tuple[str, str, str]
+    ]  # (task, duration, matched_skill)
 
 
 class TaskComposerWorkflow(Workflow):
@@ -96,15 +112,17 @@ class TaskComposerWorkflow(Workflow):
         llm: NebiusLLM,
         task_splitter_template: RichPromptTemplate,
         task_evaluator_template: RichPromptTemplate,
+        task_deps_matcher_template: RichPromptTemplate,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self._llm = llm
         self._task_splitter_template = task_splitter_template
         self._task_evaluator_template = task_evaluator_template
+        self._task_deps_matcher_template = task_deps_matcher_template
 
     @step
-    async def step_one(self, event: StartEvent) -> TaskSplitter:
+    async def split_tasks(self, event: StartEvent) -> TaskSplitter:
         logger.info("=== Step 1: Task Breakdown ===")
         logger.info(f"Input task: {event.input}")
 
@@ -117,10 +135,19 @@ class TaskComposerWorkflow(Workflow):
         logger.info("Task breakdown:")
         logger.info(response.text)
 
-        return TaskSplitter(task_splitter_output=response.text)
+        # Get skills and context from the event, default to empty if not provided
+        skills = getattr(event, "skills", [])
+        context = getattr(event, "context", "")
+
+        logger.info(f"Received skills: {skills}")
+        logger.info(f"Received context: {context}")
+
+        return TaskSplitter(
+            task_splitter_output=response.text, skills=skills, context=context
+        )
 
     @step
-    async def step_two(self, event: TaskSplitter) -> TaskEvaluator:
+    async def evaluate_tasks_duration(self, event: TaskSplitter) -> TaskEvaluator:
         logger.info("=== Step 2: Time Estimation ===")
         logger.info("Using task breakdown from Step 1:")
         logger.info(event.task_splitter_output)
@@ -144,12 +171,60 @@ class TaskComposerWorkflow(Workflow):
         log_task_duration_breakdown(merged_tasks)
         log_total_time(merged_tasks)
 
-        return TaskEvaluator(task_evaluator_output=merged_tasks)
+        return TaskEvaluator(
+            task_evaluator_output=merged_tasks,
+            skills=event.skills,
+            context=event.context,
+        )
 
     @step
-    async def step_three(self, event: TaskEvaluator) -> StopEvent:
-        logger.info("=== Step 3: Final Result ===")
-        log_task_duration_breakdown(event.task_evaluator_output)
-        log_total_time(event.task_evaluator_output)
+    async def evaluate_tasks_dependencies(
+        self, event: TaskEvaluator
+    ) -> TaskDependencyMatcher:
+        logger.info("=== Step 3: Task Dependencies ===")
+        logger.info("Matching tasks with available skills")
 
-        return StopEvent(result=event.task_evaluator_output)
+        # Get skills and context from the event
+        skills = event.skills
+        context = event.context
+
+        if not skills:
+            logger.warning("No skills provided, skipping dependency matching")
+            # Convert to dependency format with empty skill
+            task_dependencies = [
+                (task, duration, "") for task, duration in event.task_evaluator_output
+            ]
+            return TaskDependencyMatcher(task_dependency_output=task_dependencies)
+
+        skills_str = "\n".join([f"- {skill}" for skill in skills])
+        logger.info(f"Available skills: {skills}")
+        logger.info(f"Context: {context}")
+
+        task_dependencies: list[tuple[str, str, str]] = []
+        for task, duration in event.task_evaluator_output:
+            formatted_prompt: str = self._task_deps_matcher_template.format(
+                task=task, skills=skills_str, context=context
+            )
+
+            response = await asyncio.wait_for(
+                asyncio.to_thread(self._llm.complete, formatted_prompt), timeout=30.0
+            )
+
+            matched_skill = response.text.strip()
+            task_dependencies.append((task, duration, matched_skill))
+            logger.info(f"Task: {task[:50]}... -> Skill: {matched_skill}")
+
+        return TaskDependencyMatcher(task_dependency_output=task_dependencies)
+
+    @step
+    async def result_output(self, event: TaskDependencyMatcher) -> StopEvent:
+        logger.info("=== Step 4: Final Result ===")
+
+        # Log the final breakdown with dependencies
+        for task, duration, skill in event.task_dependency_output:
+            logger.info(f"Task: {task}")
+            logger.info(f"  Duration: {duration} units")
+            logger.info(f"  Matched Skill: {skill}")
+            logger.info("-" * 50)
+
+        return StopEvent(result=event.task_dependency_output)

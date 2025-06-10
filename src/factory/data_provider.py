@@ -7,6 +7,7 @@ from random import Random
 from dataclasses import dataclass, field
 
 from agents.TaskComposerAgent import TaskComposerAgent
+from domain import AgentsConfig, AGENTS_CONFIG
 
 from constraint_solvers.timetable.domain import *
 
@@ -45,10 +46,15 @@ class CountDistribution:
     weight: float
 
 
-@dataclass(kw_only=True)
-class TimeTableDataParameters:
+@dataclass(frozen=True, kw_only=True)
+class SkillSet:
     required_skills: tuple[str, ...]
     optional_skills: tuple[str, ...]
+
+
+@dataclass(kw_only=True)
+class TimeTableDataParameters:
+    skill_set: SkillSet
     days_in_schedule: int
     employee_count: int
     optional_skill_distribution: tuple[CountDistribution, ...]
@@ -59,9 +65,19 @@ class TimeTableDataParameters:
 # =========================
 #        DEMO PARAMS
 # =========================
+SKILL_SET = SkillSet(
+    required_skills=("Frontend Engineer", "Backend Engineer", "Cloud Engineer"),
+    optional_skills=(
+        "Security Expert",
+        "DevOps Engineer",
+        "Data Engineer",
+        "Network Engineer",
+        "AI Engineer",
+    ),
+)
+
 DATA_PARAMS = TimeTableDataParameters(
-    required_skills=("System Admin", "Network Engineer"),
-    optional_skills=("Security Expert", "Database Admin", "DevOps Engineer"),
+    skill_set=SKILL_SET,
     days_in_schedule=28,
     employee_count=50,
     optional_skill_distribution=(
@@ -105,9 +121,19 @@ async def generate_agent_data(file, project_id: str = "") -> EmployeeSchedule:
         case _:
             raise ValueError(f"Unsupported file type: {type(file)}")
 
-    # Run agent
-    agent = TaskComposerAgent()
-    agent_output = await agent.run_workflow(input_str)
+    # Run agent with skills and context
+    agent = TaskComposerAgent(AGENTS_CONFIG)  # Use global config
+
+    # Get available skills from parameters
+    available_skills = list(parameters.skill_set.required_skills) + list(
+        parameters.skill_set.optional_skills
+    )
+    context = f"Project scheduling for {parameters.employee_count} employees over {parameters.days_in_schedule} days"
+
+    agent_output = await agent.run_workflow(
+        query=input_str, skills=available_skills, context=context
+    )
+
     tasks = tasks_from_agent_output(agent_output, parameters, project_id)
     generate_employee_availability(employees, parameters, start_date, randomizer)
 
@@ -138,8 +164,8 @@ def generate_employees(
             weights=weights(parameters.optional_skill_distribution),
         )
         skills = []
-        skills += random.sample(parameters.optional_skills, count)
-        skills += random.sample(parameters.required_skills, 1)
+        skills += random.sample(parameters.skill_set.optional_skills, count)
+        skills += random.sample(parameters.skill_set.required_skills, 1)
         employees.append(Employee(name=name_permutations[i], skills=set(skills)))
 
     return employees
@@ -190,9 +216,9 @@ def generate_tasks(
 
     for description, duration in task_tuples:
         if random.random() >= 0.5:
-            required_skill = random.choice(parameters.required_skills)
+            required_skill = random.choice(parameters.skill_set.required_skills)
         else:
-            required_skill = random.choice(parameters.optional_skills)
+            required_skill = random.choice(parameters.skill_set.optional_skills)
         tasks.append(
             Task(
                 id=next(ids),
@@ -240,24 +266,47 @@ def earliest_monday_on_or_after(target_date: date) -> date:
 
 def tasks_from_agent_output(agent_output, parameters, project_id: str = ""):
     """
-    Convert TaskComposerAgent output (list of (description, duration)) to Task objects.
+    Convert TaskComposerAgent output (list of (description, duration, skill)) to Task objects.
     """
     from constraint_solvers.timetable.domain import Task
 
     ids = generate_task_ids()
     tasks = []
-    import random
 
-    for sequence_num, (description, duration) in enumerate(agent_output):
+    for sequence_num, task_data in enumerate(agent_output):
+        # Handle both old format (description, duration) and new format (description, duration, skill)
+        if len(task_data) == 3:
+            description, duration, required_skill = task_data
+        elif len(task_data) == 2:
+            description, duration = task_data
+            # Fallback to random assignment if no skill provided
+            import random
+
+            if random.random() >= 0.5:
+                required_skill = random.choice(parameters.skill_set.required_skills)
+            else:
+                required_skill = random.choice(parameters.skill_set.optional_skills)
+        else:
+            continue  # skip invalid task data
+
         try:
             duration_int = int(duration)
         except (ValueError, TypeError):
             continue  # skip this task if duration is invalid
-        # Assign a required skill randomly from required or optional
-        if random.random() >= 0.5:
-            required_skill = random.choice(parameters.required_skills)
-        else:
-            required_skill = random.choice(parameters.optional_skills)
+
+        # Clean up skill name (remove any extra formatting)
+        if required_skill:
+            required_skill = required_skill.strip()
+            # Ensure the skill exists in our skill set
+            all_skills = list(parameters.skill_set.required_skills) + list(
+                parameters.skill_set.optional_skills
+            )
+            if required_skill not in all_skills:
+                # If skill doesn't match exactly, try to find closest match or fallback to random
+                import random
+
+                required_skill = random.choice(parameters.skill_set.required_skills)
+
         tasks.append(
             Task(
                 id=next(ids),
@@ -270,6 +319,10 @@ def tasks_from_agent_output(agent_output, parameters, project_id: str = ""):
             )
         )
     return tasks
+
+
+def skills_from_parameters(parameters: TimeTableDataParameters) -> list[str]:
+    return list(parameters.required_skills) + list(parameters.optional_skills)
 
 
 async def load_data(data_source_value, file_obj, llm_output):

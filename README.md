@@ -52,12 +52,13 @@ It takes a project description file such as a README.md file, breaks it down int
 | **Markdown Project Parsing** | Automatic extraction of tasks from Markdown docs | ✅ |
 | **LLM-Powered Task Analysis** | [LLamaIndex](https://www.llamaindex.ai/) + [Nebius AI](https://nebius.ai/) for task decomposition & estimation | ✅ |
 | **Constraint-Based Scheduling** | [Timefold](http://www.timefold.ai) optimization engine for schedule assignments | ✅ |
-| **Skills Matching** | Detection of skills required for tasks | 🚧 WIP |
+| **Skills Matching** | Detection of skills required for each task | ✅ |
 | **Task Dependencies** | Sequential workflow modeling | ✅ |
 
 ### Work in Progress
 
-- **Skills matching:** task-to-skill matching is currently random, working on an additional, LLM-based workflow step
+- **Gradio UI overhaul**
+- **General optimization of the workflow**
 
 ### Future Work
 

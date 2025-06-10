@@ -20,6 +20,7 @@ from factory.data_provider import (
     TimeTableDataParameters,
     generate_employees,
     generate_employee_availability,
+    SLOTS_PER_DAY,
 )
 
 from constraint_solvers.timetable.domain import (
@@ -130,7 +131,9 @@ async def show_solved(
     schedule: EmployeeSchedule = EmployeeSchedule(
         employees=employees,
         tasks=tasks,
-        schedule_info=ScheduleInfo(total_slots=parameters.days_in_schedule * 16),
+        schedule_info=ScheduleInfo(
+            total_slots=parameters.days_in_schedule * SLOTS_PER_DAY
+        ),
     )
 
     try:
@@ -333,7 +336,9 @@ async def load_data(
         final_schedule: EmployeeSchedule = EmployeeSchedule(
             employees=list(combined_employees.values()),
             tasks=combined_tasks,
-            schedule_info=ScheduleInfo(total_slots=parameters.days_in_schedule * 16),
+            schedule_info=ScheduleInfo(
+                total_slots=parameters.days_in_schedule * SLOTS_PER_DAY
+            ),
         )
 
         emp_df: pd.DataFrame = employees_to_dataframe(final_schedule)

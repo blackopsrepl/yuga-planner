@@ -19,8 +19,8 @@ logging.basicConfig(level=logging.INFO)
 #        CONSTANTS
 # =========================
 
-# Each slot is 30 minutes
-SLOTS_PER_DAY = 16
+# Each slot is 30 minutes - 20 slots = 10 hours working day
+SLOTS_PER_DAY = 20
 
 ### EMPLOYEES ###
 FIRST_NAMES = ("Amy", "Beth", "Carl", "Dan", "Elsa", "Flo", "Gus", "Hugo", "Ivy", "Jay")

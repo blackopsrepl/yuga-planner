@@ -38,7 +38,7 @@ def get_slot_date(slot: int) -> date:
     Returns:
         date: The date corresponding to the slot.
     """
-    return date.today() + timedelta(days=slot // 16)  # 16 slots per day
+    return date.today() + timedelta(days=slot // 20)  # 20 slots per day
 
 
 @constraint_provider
@@ -175,11 +175,10 @@ def maintain_project_task_order(constraint_factory: ConstraintFactory):
             task1.start_slot + task1.duration_slots > task2.start_slot
         )
         .penalize(
-            HardSoftDecimalScore.ONE_HARD,
-            lambda task1, task2: task1.start_slot
-            + task1.duration_slots
-            - task2.start_slot,
-        )  # Penalty proportional to overlap
+            HardSoftDecimalScore.ONE_SOFT,
+            lambda task1, task2: 10
+            * (task1.start_slot + task1.duration_slots - task2.start_slot),
+        )  # Moderate penalty (10x) proportional to overlap
         .as_constraint("Project task sequence order")
     )
 

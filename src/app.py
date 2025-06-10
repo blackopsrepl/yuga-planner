@@ -1,55 +1,31 @@
-# =========================
-#        GENERAL IMPORTS
-# =========================
-import os, uuid, random
-import pandas as pd
-from datetime import datetime, timedelta
-
-import logging
+import os, argparse, logging
+import gradio as gr
 
 logging.basicConfig(level=logging.INFO)
+
 
 from utils.load_secrets import load_secrets
 
 if not os.getenv("NEBIUS_API_KEY") or not os.getenv("NEBIUS_MODEL"):
     load_secrets("tests/secrets/creds.py")
 
-# =========================
-#          GRADIO
-# =========================
-import gradio as gr
 
-# =========================
-#     TIMETABLE SOLVER
-# =========================
-from factory.data_provider import (
-    generate_agent_data,
-    DATA_PARAMS,
-    generate_employees,
-    generate_employee_availability,
-    TimeTableDataParameters,
+from handlers import (
+    load_data,
+    show_solved,
+    start_timer,
+    auto_poll,
 )
 
-
-from constraint_solvers.timetable.solver import solver_manager
-from constraint_solvers.timetable.domain import (
-    EmployeeSchedule,
-    ScheduleInfo,
-    Task,
-    Employee,
-)
-
-solved_schedules: dict[str, EmployeeSchedule] = {}
+from state import app_state
 
 
 # =========================
 #           APP
 # =========================
 
-DEBUG: bool = False
 
-
-def app():
+def app(debug: bool = False):
     with gr.Blocks() as demo:
         gr.Markdown(
             """
@@ -110,7 +86,7 @@ def app():
             show_solved, inputs=[llm_output_state, job_id_state], outputs=outputs
         ).then(start_timer, inputs=[job_id_state, llm_output_state], outputs=timer)
 
-        if DEBUG:
+        if debug:
 
             def debug_set_state(state):
                 logging.info(f"DEBUG: Setting state to test_value")
@@ -138,335 +114,29 @@ def app():
     return demo
 
 
-# =========================
-#      EVENT FUNCTIONS
-# =========================
-async def show_solved(
-    task_df_json, job_id
-) -> tuple[pd.DataFrame, pd.DataFrame, str, str, object]:
-    logging.info("Task DataFrame JSON received in show_solved: %s", task_df_json)
-    if not task_df_json:
-        return (
-            gr.update(),
-            gr.update(),
-            None,
-            "No schedule to solve. Please load data first.",
-            None,
-        )
-    import pandas as pd
-    from io import StringIO
-
-    task_df: pd.DataFrame = pd.read_json(StringIO(task_df_json), orient="split")
-
-    # Log sequence numbers from JSON for debugging
-    logging.info("Task sequence numbers from JSON in show_solved:")
-    for _, row in task_df.iterrows():
-        logging.info(
-            f"Project: {row.get('Project', 'N/A')}, Sequence: {row.get('Sequence', 'N/A')}, Task: {row['Task']}"
-        )
-
-    parameters: TimeTableDataParameters = DATA_PARAMS
-    start_date: datetime = datetime.now().date()
-    randomizer: random.Random = random.Random(parameters.random_seed)
-    employees = generate_employees(parameters, randomizer)
-
-    # Generate task IDs
-    ids = (str(i) for i in range(len(task_df)))
-
-    # Generate tasks from the DataFrame
-    tasks = []
-    for _, row in task_df.iterrows():
-        tasks.append(
-            Task(
-                id=next(ids),
-                description=row["Task"],
-                duration_slots=int(float(row["Duration (hours)"]) * 2),
-                start_slot=0,
-                required_skill=row["Required Skill"],
-                project_id=row.get("Project", ""),
-                sequence_number=int(row.get("Sequence", 0)),
-            )
-        )
-
-    # Generate employee availability preferences
-    #
-    generate_employee_availability(employees, parameters, start_date, randomizer)
-    schedule: EmployeeSchedule = EmployeeSchedule(
-        employees=employees,
-        tasks=tasks,
-        schedule_info=ScheduleInfo(total_slots=parameters.days_in_schedule * 16),
-    )
-
-    # Wait for the solver
-    emp_df, solved_task_df, new_job_id, status = await solve_schedule(schedule)
-
-    # Return the solved schedule
-    return emp_df, solved_task_df, new_job_id, status, task_df_json
-
-
-async def solve_schedule(schedule) -> tuple[pd.DataFrame, pd.DataFrame, str, str]:
-    """
-    Solves the schedule and returns the dataframes and job_id.
-    """
-    if schedule is None:
-        return None, None, None, "No schedule to solve. Please load data first."
-
-    job_id: str = str(uuid.uuid4())
-
-    # Start solving asynchronously
-    def listener(solution):
-        solved_schedules[job_id] = solution
-
-    solver_manager.solve_and_listen(job_id, schedule, listener)
-
-    emp_df = employees_to_dataframe(schedule)
-    task_df = schedule_to_dataframe(schedule)
-
-    task_df = task_df[
-        [
-            "Project",
-            "Sequence",
-            "Employee",
-            "Task",
-            "Start",
-            "End",
-            "Duration (hours)",
-            "Required Skill",
-        ]
-    ].sort_values(["Project", "Sequence"])
-
-    return emp_df, task_df, job_id, "Solving..."
-
-
-async def load_data(file_obj, llm_output):
-    if file_obj is None:
-        logging.error(
-            "NO FILE OBJECT: User attempted to load data without uploading a file."
-        )
-
-        # Show an error message in the status_text output, too
-        return (
-            gr.update(),
-            gr.update(),
-            gr.update(),
-            "No file uploaded. Please upload a file.",
-            gr.update(),
-        )
-
-    # Support multiple files. Gradio returns a list when multiple files are selected.
-    files = file_obj if isinstance(file_obj, list) else [file_obj]
-
-    combined_tasks: list[Task] = []
-    combined_employees: dict[str, Employee] = {}
-
-    for idx, single_file in enumerate(files):
-        # Derive a project ID from the filename (fallback to index)
-        try:
-            project_id = os.path.splitext(os.path.basename(single_file.name))[0]
-        except AttributeError:
-            project_id = f"project_{idx+1}"
-
-        schedule_part: EmployeeSchedule = await generate_agent_data(
-            single_file, project_id=project_id
-        )
-
-        # Merge employees (unique by name)
-        for emp in schedule_part.employees:
-            if emp.name not in combined_employees:
-                combined_employees[emp.name] = emp
-
-        # Append tasks with project id already set
-        combined_tasks.extend(schedule_part.tasks)
-
-    parameters: TimeTableDataParameters = DATA_PARAMS
-    final_schedule: EmployeeSchedule = EmployeeSchedule(
-        employees=list(combined_employees.values()),
-        tasks=combined_tasks,
-        schedule_info=ScheduleInfo(total_slots=parameters.days_in_schedule * 16),
-    )
-
-    emp_df: pd.DataFrame = employees_to_dataframe(final_schedule)
-    task_df: pd.DataFrame = schedule_to_dataframe(final_schedule)
-
-    # Before solving, sort by project and sequence to maintain original order
-    # After solving, tasks will be sorted by start time
-    task_df: pd.DataFrame = task_df[
-        [
-            "Project",
-            "Sequence",
-            "Employee",
-            "Task",
-            "Start",
-            "End",
-            "Duration (hours)",
-            "Required Skill",
-        ]
-    ].sort_values(["Project", "Sequence"])
-
-    # Log sequence numbers for debugging
-    logging.info("Task sequence numbers after load_data:")
-    for _, row in task_df.iterrows():
-        logging.info(
-            f"Project: {row['Project']}, Sequence: {row['Sequence']}, Task: {row['Task']}"
-        )
-
-    if DEBUG:
-        # Log the first few rows of the DataFrame for debugging
-        logging.info("Task DataFrame being set in load_data: %s", task_df.head())
-
-    # Convert to JSON
-    task_df_json: str = task_df.to_json(orient="split")
-
-    # Always set the state to the new DataFrame JSON when new data is loaded
-    return emp_df, task_df, gr.update(), gr.update(), task_df_json
-
-
-def start_timer(job_id, llm_output) -> gr.Timer:
-    return gr.Timer(active=True)
-
-
-def poll_solution(
-    job_id, schedule
-) -> tuple[pd.DataFrame, pd.DataFrame, str, str, object]:
-    """
-    Poll for a solution for a given job_id.
-
-    Args:
-        job_id (str): The job_id to poll for.
-        schedule (object): The current schedule state.
-
-    Returns:
-        tuple[pd.DataFrame, pd.DataFrame, str, str, object]: The solved schedule.
-    """
-    if job_id and job_id in solved_schedules:
-        solved_schedule: EmployeeSchedule = solved_schedules[job_id]
-
-        emp_df: pd.DataFrame = employees_to_dataframe(solved_schedule)
-        task_df: pd.DataFrame = schedule_to_dataframe(solved_schedule)
-
-        # Log solved task order for debugging
-        logging.info("Solved task order:")
-        for _, row in task_df.iterrows():
-            logging.info(
-                f"Project: {row['Project']}, Sequence: {row['Sequence']}, Task: {row['Task'][:30]}, Start: {row['Start']}"
-            )
-
-        task_df: pd.DataFrame = task_df[
-            [
-                "Project",
-                "Sequence",
-                "Employee",
-                "Task",
-                "Start",
-                "End",
-                "Duration (hours)",
-                "Required Skill",
-            ]
-        ].sort_values(["Start"])
-
-        return emp_df, task_df, job_id, "Solved!", solved_schedule
-
-    return None, None, job_id, "Solving...", schedule
-
-
-def auto_poll(
-    job_id: str, schedule
-) -> tuple[pd.DataFrame, pd.DataFrame, str, str, object]:
-    """
-    Poll for a solution for a given job_id.
-
-    Args:
-        job_id (str): The job_id to poll for.
-        schedule (object): The current schedule state.
-    """
-    if job_id:
-        emp_df, task_df, job_id, status, schedule = poll_solution(job_id, schedule)
-        return emp_df, task_df, job_id, status, schedule
-
-    # Defensive: always return 5 values, even if all are None
-    return (
-        gr.update(),  # employees_table
-        gr.update(),  # schedule_table
-        None,  # job_id_state
-        gr.update(),  # status_text
-        None,  # schedule_state
-    )
-
-
-# =========================
-#     HELPER FUNCTIONS
-# =========================
-def schedule_to_dataframe(schedule) -> pd.DataFrame:
-    """
-    Convert an EmployeeSchedule to a pandas DataFrame.
-
-    Args:
-        schedule (EmployeeSchedule): The schedule to convert.
-
-    Returns:
-        pd.DataFrame: The converted DataFrame.
-    """
-    data: list[dict[str, str]] = []
-
-    # Process each task in the schedule
-    for task in schedule.tasks:
-        # Get employee name or "Unassigned" if no employee assigned
-        employee: str = task.employee.name if task.employee else "Unassigned"
-
-        # Calculate start and end times based on 30-minute slots
-        start_time: datetime = datetime.now() + timedelta(minutes=30 * task.start_slot)
-        end_time: datetime = start_time + timedelta(minutes=30 * task.duration_slots)
-
-        # Add task data to list with availability flags
-        data.append(
-            {
-                "Project": getattr(task, "project_id", ""),
-                "Sequence": getattr(task, "sequence_number", 0),
-                "Employee": employee,
-                "Task": task.description,
-                "Start": start_time,
-                "End": end_time,
-                "Duration (hours)": task.duration_slots / 2,  # Convert slots to hours
-                "Required Skill": task.required_skill,
-                # Check if task falls on employee's unavailable date
-                "Unavailable": employee != "Unassigned"
-                and hasattr(task.employee, "unavailable_dates")
-                and start_time.date() in task.employee.unavailable_dates,
-                # Check if task falls on employee's undesired date
-                "Undesired": employee != "Unassigned"
-                and hasattr(task.employee, "undesired_dates")
-                and start_time.date() in task.employee.undesired_dates,
-                # Check if task falls on employee's desired date
-                "Desired": employee != "Unassigned"
-                and hasattr(task.employee, "desired_dates")
-                and start_time.date() in task.employee.desired_dates,
-            }
-        )
-
-    return pd.DataFrame(data)
-
-
-def employees_to_dataframe(schedule) -> pd.DataFrame:
-    """
-    Convert an EmployeeSchedule to a pandas DataFrame.
-
-    Args:
-        schedule (EmployeeSchedule): The schedule to convert.
-    """
-    data: list[dict[str, str]] = []
-
-    for emp in schedule.employees:
-        first, last = emp.name.split(" ", 1) if " " in emp.name else (emp.name, "")
-        data.append(
-            {
-                "First Name": first,
-                "Last Name": last,
-                "Skills": ", ".join(sorted(emp.skills)),
-            }
-        )
-
-    return pd.DataFrame(data)
-
-
 if __name__ == "__main__":
-    app().launch(server_name="0.0.0.0", server_port=7860)
+    parser = argparse.ArgumentParser(
+        description="Yuga Planner - Team Scheduling Application"
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug mode with additional UI controls and logging",
+    )
+    parser.add_argument(
+        "--server-name",
+        default="0.0.0.0",
+        help="Server name/IP to bind to (default: 0.0.0.0)",
+    )
+    parser.add_argument(
+        "--server-port",
+        type=int,
+        default=7860,
+        help="Server port to bind to (default: 7860)",
+    )
+
+    args = parser.parse_args()
+
+    app(debug=args.debug).launch(
+        server_name=args.server_name, server_port=args.server_port
+    )

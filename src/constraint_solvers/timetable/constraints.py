@@ -155,41 +155,33 @@ def desired_day_for_employee(constraint_factory: ConstraintFactory):
 
 def maintain_project_task_order(constraint_factory: ConstraintFactory):
     """Ensure tasks within the same project maintain their original order."""
-    print("*** CREATING PROJECT TASK ORDER CONSTRAINT ***")
-
-    try:
-        # For each task, ensure it finishes before any task with higher sequence in same project starts
-        constraint = (
-            constraint_factory.for_each(Task)
-            .join(Task)
-            .filter(
-                lambda task1, task2:
-                # Same project, different tasks
-                task1.id != task2.id
-                and hasattr(task1, "project_id")
-                and hasattr(task2, "project_id")
-                and task1.project_id != ""
-                and task1.project_id == task2.project_id
-                and
-                # task1 has lower sequence number than task2
-                task1.sequence_number < task2.sequence_number
-                and
-                # but task1 doesn't finish before task2 starts (violation!)
-                task1.start_slot + task1.duration_slots > task2.start_slot
-            )
-            .penalize(
-                HardSoftDecimalScore.ONE_HARD,
-                lambda task1, task2: task1.start_slot
-                + task1.duration_slots
-                - task2.start_slot,
-            )  # Penalty proportional to overlap
-            .as_constraint("Project task sequence order")
+    # For each task, ensure it finishes before any task with higher sequence in the same project
+    return (
+        constraint_factory.for_each(Task)
+        .join(Task)
+        .filter(
+            lambda task1, task2:
+            # Same project, different tasks
+            task1.id != task2.id
+            and hasattr(task1, "project_id")
+            and hasattr(task2, "project_id")
+            and task1.project_id != ""
+            and task1.project_id == task2.project_id
+            and
+            # task1 has lower sequence number than task2
+            task1.sequence_number < task2.sequence_number
+            and
+            # but task1 doesn't finish before task2 starts (violation!)
+            task1.start_slot + task1.duration_slots > task2.start_slot
         )
-        print("*** PROJECT TASK ORDER CONSTRAINT CREATED SUCCESSFULLY ***")
-        return constraint
-    except Exception as e:
-        print(f"*** ERROR CREATING CONSTRAINT: {e} ***")
-        raise
+        .penalize(
+            HardSoftDecimalScore.ONE_HARD,
+            lambda task1, task2: task1.start_slot
+            + task1.duration_slots
+            - task2.start_slot,
+        )  # Penalty proportional to overlap
+        .as_constraint("Project task sequence order")
+    )
 
 
 def balance_employee_task_assignments(constraint_factory: ConstraintFactory):

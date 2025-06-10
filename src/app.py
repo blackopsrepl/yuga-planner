@@ -58,7 +58,7 @@ def app(debug: bool = False):
         with gr.Row():
             employee_count = gr.Number(
                 label="Number of Employees",
-                value=10,
+                value=12,
                 minimum=1,
                 maximum=100,
                 step=1,
@@ -66,7 +66,7 @@ def app(debug: bool = False):
             )
             days_in_schedule = gr.Number(
                 label="Days in Schedule",
-                value=60,
+                value=365,
                 minimum=1,
                 maximum=365,
                 step=1,

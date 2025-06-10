@@ -59,16 +59,57 @@ def employees_to_dataframe(schedule) -> pd.DataFrame:
     Args:
         schedule (EmployeeSchedule): The schedule to convert.
     """
+
+    def format_dates(dates_list, max_display=3):
+        """Helper function to format dates for display"""
+        if not dates_list:
+            return "None"
+        try:
+            sorted_dates = sorted(dates_list)
+            if len(sorted_dates) <= max_display:
+                return ", ".join(d.strftime("%m/%d") for d in sorted_dates)
+            else:
+                displayed = ", ".join(
+                    d.strftime("%m/%d") for d in sorted_dates[:max_display]
+                )
+                return f"{displayed} (+{len(sorted_dates) - max_display} more)"
+        except Exception:
+            return f"{len(dates_list)} dates"
+
     data: list[dict[str, str]] = []
 
     for emp in schedule.employees:
-        first, last = emp.name.split(" ", 1) if " " in emp.name else (emp.name, "")
-        data.append(
-            {
-                "First Name": first,
-                "Last Name": last,
-                "Skills": ", ".join(sorted(emp.skills)),
-            }
-        )
+        try:
+            first, last = emp.name.split(" ", 1) if " " in emp.name else (emp.name, "")
+
+            # Safely get preference dates with fallback to empty sets
+            unavailable_dates = getattr(emp, "unavailable_dates", set())
+            undesired_dates = getattr(emp, "undesired_dates", set())
+            desired_dates = getattr(emp, "desired_dates", set())
+
+            data.append(
+                {
+                    "First Name": first,
+                    "Last Name": last,
+                    "Skills": ", ".join(sorted(emp.skills)),
+                    "Unavailable Dates": format_dates(unavailable_dates),
+                    "Undesired Dates": format_dates(undesired_dates),
+                    "Desired Dates": format_dates(desired_dates),
+                    "Total Preferences": f"{len(unavailable_dates)} unavailable, {len(undesired_dates)} undesired, {len(desired_dates)} desired",
+                }
+            )
+        except Exception as e:
+            # Fallback for any employee that causes issues
+            data.append(
+                {
+                    "First Name": str(emp.name),
+                    "Last Name": "",
+                    "Skills": ", ".join(sorted(getattr(emp, "skills", []))),
+                    "Unavailable Dates": "Error loading",
+                    "Undesired Dates": "Error loading",
+                    "Desired Dates": "Error loading",
+                    "Total Preferences": "Error loading preferences",
+                }
+            )
 
     return pd.DataFrame(data)

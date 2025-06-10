@@ -7,6 +7,12 @@ from typing import Tuple, Dict, List, Optional
 import pandas as pd
 
 import gradio as gr
+from state import app_state
+
+from constraint_solvers.timetable.solver import solver_manager
+from domain import MOCK_PROJECTS
+
+from helpers import schedule_to_dataframe, employees_to_dataframe
 
 from factory.data_provider import (
     generate_agent_data,
@@ -22,13 +28,6 @@ from constraint_solvers.timetable.domain import (
     Task,
     Employee,
 )
-from constraint_solvers.timetable.solver import solver_manager
-from domain import MOCK_PROJECTS
-
-from helpers import schedule_to_dataframe, employees_to_dataframe
-
-# Global state for solved schedules
-solved_schedules: Dict[str, EmployeeSchedule] = {}
 
 
 async def show_solved(
@@ -63,7 +62,7 @@ async def show_solved(
             gr.update(),
             gr.update(),
             None,
-            "No schedule to solve. Please load data first.",
+            "No schedule to solve. Please load data first using the 'Load Data' button.",
             None,
         )
 
@@ -166,7 +165,7 @@ async def solve_schedule(
 
     # Start solving asynchronously
     def listener(solution):
-        solved_schedules[job_id] = solution
+        app_state.add_solved_schedule(job_id, solution)
 
     solver_manager.solve_and_listen(job_id, schedule, listener)
 
@@ -367,7 +366,7 @@ async def load_data(
 
         # Store schedule for later use
         job_id = str(uuid.uuid4())
-        solved_schedules[job_id] = final_schedule
+        app_state.add_solved_schedule(job_id, final_schedule)
 
         # Convert to JSON for state and include parameters
         state_data = {
@@ -530,8 +529,8 @@ def poll_solution(
     Returns:
         tuple[pd.DataFrame, pd.DataFrame, str, str, object]: The solved schedule.
     """
-    if job_id and job_id in solved_schedules:
-        solved_schedule: EmployeeSchedule = solved_schedules[job_id]
+    if job_id and app_state.has_solved_schedule(job_id):
+        solved_schedule: EmployeeSchedule = app_state.get_solved_schedule(job_id)
 
         emp_df: pd.DataFrame = employees_to_dataframe(solved_schedule)
         task_df: pd.DataFrame = schedule_to_dataframe(solved_schedule)
@@ -586,8 +585,8 @@ async def auto_poll(
 ) -> Tuple[pd.DataFrame, pd.DataFrame, str, str, dict]:
     """Poll for updates"""
     try:
-        if job_id and job_id in solved_schedules:
-            schedule = solved_schedules[job_id]
+        if job_id and app_state.has_solved_schedule(job_id):
+            schedule = app_state.get_solved_schedule(job_id)
             emp_df = employees_to_dataframe(schedule)
             task_df = schedule_to_dataframe(schedule)
 

@@ -248,7 +248,7 @@ def tasks_from_agent_output(agent_output, parameters, project_id: str = ""):
     tasks = []
     import random
 
-    for description, duration in agent_output:
+    for sequence_num, (description, duration) in enumerate(agent_output):
         try:
             duration_int = int(duration)
         except (ValueError, TypeError):
@@ -266,6 +266,7 @@ def tasks_from_agent_output(agent_output, parameters, project_id: str = ""):
                 start_slot=0,
                 required_skill=required_skill,
                 project_id=project_id,
+                sequence_number=sequence_num,
             )
         )
     return tasks

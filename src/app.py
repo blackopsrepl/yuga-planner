@@ -157,6 +157,14 @@ async def show_solved(
     from io import StringIO
 
     task_df: pd.DataFrame = pd.read_json(StringIO(task_df_json), orient="split")
+
+    # Log sequence numbers from JSON for debugging
+    logging.info("Task sequence numbers from JSON in show_solved:")
+    for _, row in task_df.iterrows():
+        logging.info(
+            f"Project: {row.get('Project', 'N/A')}, Sequence: {row.get('Sequence', 'N/A')}, Task: {row['Task']}"
+        )
+
     parameters: TimeTableDataParameters = DATA_PARAMS
     start_date: datetime = datetime.now().date()
     randomizer: random.Random = random.Random(parameters.random_seed)
@@ -176,6 +184,7 @@ async def show_solved(
                 start_slot=0,
                 required_skill=row["Required Skill"],
                 project_id=row.get("Project", ""),
+                sequence_number=int(row.get("Sequence", 0)),
             )
         )
 
@@ -216,6 +225,7 @@ async def solve_schedule(schedule) -> tuple[pd.DataFrame, pd.DataFrame, str, str
     task_df = task_df[
         [
             "Project",
+            "Sequence",
             "Employee",
             "Task",
             "Start",
@@ -223,7 +233,7 @@ async def solve_schedule(schedule) -> tuple[pd.DataFrame, pd.DataFrame, str, str
             "Duration (hours)",
             "Required Skill",
         ]
-    ].sort_values(["Start"])
+    ].sort_values(["Project", "Sequence"])
 
     return emp_df, task_df, job_id, "Solving..."
 
@@ -278,11 +288,12 @@ async def load_data(file_obj, llm_output):
     emp_df: pd.DataFrame = employees_to_dataframe(final_schedule)
     task_df: pd.DataFrame = schedule_to_dataframe(final_schedule)
 
-    # Sort the tasks by start time
-    # TODO: should have task dependency constraints, but we don't have that yet
+    # Before solving, sort by project and sequence to maintain original order
+    # After solving, tasks will be sorted by start time
     task_df: pd.DataFrame = task_df[
         [
             "Project",
+            "Sequence",
             "Employee",
             "Task",
             "Start",
@@ -290,14 +301,21 @@ async def load_data(file_obj, llm_output):
             "Duration (hours)",
             "Required Skill",
         ]
-    ].sort_values(["Start"])
+    ].sort_values(["Project", "Sequence"])
 
-    # Convert to JSON
-    task_df_json: str = task_df.to_json(orient="split")
+    # Log sequence numbers for debugging
+    logging.info("Task sequence numbers after load_data:")
+    for _, row in task_df.iterrows():
+        logging.info(
+            f"Project: {row['Project']}, Sequence: {row['Sequence']}, Task: {row['Task']}"
+        )
 
     if DEBUG:
         # Log the first few rows of the DataFrame for debugging
         logging.info("Task DataFrame being set in load_data: %s", task_df.head())
+
+    # Convert to JSON
+    task_df_json: str = task_df.to_json(orient="split")
 
     # Always set the state to the new DataFrame JSON when new data is loaded
     return emp_df, task_df, gr.update(), gr.update(), task_df_json
@@ -326,9 +344,17 @@ def poll_solution(
         emp_df: pd.DataFrame = employees_to_dataframe(solved_schedule)
         task_df: pd.DataFrame = schedule_to_dataframe(solved_schedule)
 
+        # Log solved task order for debugging
+        logging.info("Solved task order:")
+        for _, row in task_df.iterrows():
+            logging.info(
+                f"Project: {row['Project']}, Sequence: {row['Sequence']}, Task: {row['Task'][:30]}, Start: {row['Start']}"
+            )
+
         task_df: pd.DataFrame = task_df[
             [
                 "Project",
+                "Sequence",
                 "Employee",
                 "Task",
                 "Start",
@@ -395,6 +421,7 @@ def schedule_to_dataframe(schedule) -> pd.DataFrame:
         data.append(
             {
                 "Project": getattr(task, "project_id", ""),
+                "Sequence": getattr(task, "sequence_number", 0),
                 "Employee": employee,
                 "Task": task.description,
                 "Start": start_time,

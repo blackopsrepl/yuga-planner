@@ -28,9 +28,11 @@ It takes a project description file such as a README.md file, breaks it down int
 
 1. Go to [the live demo](https://huggingface.co/spaces/Agents-MCP-Hackathon/yuga-planner) or [http://localhost:7860](http://localhost:7860)
 
-2. Upload a Markdown project file, click "Load Data"
-    - The app will parse, decompose, and estimate tasks
-    - Click "Solve" to generate an optimal schedule
+2. Upload one or more Markdown project file(s), then click "Load Data"
+   - Each file will be taken as a separate project
+   - The app will parse, decompose, and estimate tasks
+   - Click "Solve" to generate an optimal schedule
+   - Task order is preserved withing each project
 
 3. When the data is loaded, click "Solve" and view results interactively
 
@@ -38,7 +40,7 @@ It takes a project description file such as a README.md file, breaks it down int
 
 - **Gradio UI:** Main entry point for users
 - **TaskComposerAgent:** Uses LLMs to decompose and estimate tasks from Markdown
-- **Data Provider:** Generates synthetic employee data and availability
+- **Data Provider:** Generates synthetic employee data and availability preferences
 - **Constraint Solver:** Assigns tasks to employees, optimizing for skills, availability, and fairness
 - **Utils:** Markdown analysis, secret loading, and more
 
@@ -51,18 +53,18 @@ It takes a project description file such as a README.md file, breaks it down int
 | **LLM-Powered Task Analysis** | [LLamaIndex](https://www.llamaindex.ai/) + [Nebius AI](https://nebius.ai/) for task decomposition & estimation | ✅ |
 | **Constraint-Based Scheduling** | [Timefold](http://www.timefold.ai) optimization engine for schedule assignments | ✅ |
 | **Skills Matching** | Detection of skills required for tasks | 🚧 WIP |
-| **Task Dependencies** | Sequential workflow modeling | 🚧 WIP |
+| **Task Dependencies** | Sequential workflow modeling | ✅ |
 
 ### Work in Progress
 
-- **Skills matching:** currently random, working on LLM-based skill matching
-- **Task dependencies:** currently random, working on task dependency detection system; may use LLMs or not
+- **Skills matching:** task-to-skill matching is currently random, working on an additional, LLM-based workflow step
 
 ### Future Work
 
+- **More granular task dependency** representation of tasks in a tree instead of a list to allow overlap within projects, where feasible/convenient
 - **Input from GitHub issues:** instead of processing markdown directly, it creates a list by parsing issue
-- **Chat interface:** detection of user commands for CRUD operations on tasks and schedules
-- **Reinforcement learning:** training the agent to improve task decomposition and estimation from GitHub metrics (e.g. diffs in timestamps, issue comments etc.)
+- **Chat interface:** detection of user intent, with on-the-fly CRUD operations on team, tasks and schedules
+- **Reinforcement learning:** training the agent to improve task decomposition and estimation from GitHub history (e.g. diffs in timestamps, issue comments etc.)
 
 ## Prerequisites (Local/GitHub)
 

@@ -34,11 +34,17 @@ solved_schedules: Dict[str, EmployeeSchedule] = {}
 async def show_solved(
     task_df_json: str, job_id: str, debug: bool = False
 ) -> Tuple[pd.DataFrame, pd.DataFrame, str, str, object]:
+    # Add debugging to understand what's happening
+    logging.info(
+        f"show_solved called with task_df_json type: {type(task_df_json)}, job_id: {job_id}"
+    )
+
     # Dataframe from JSON debug logging
     if debug:
         logging.info("Task DataFrame JSON received in show_solved: %s", task_df_json)
 
     if not task_df_json:
+        logging.warning("No task_df_json provided to show_solved")
         return (
             gr.update(),
             gr.update(),
@@ -47,7 +53,17 @@ async def show_solved(
             None,
         )
 
-    task_df: pd.DataFrame = pd.read_json(StringIO(task_df_json), orient="split")
+    try:
+        task_df: pd.DataFrame = pd.read_json(StringIO(task_df_json), orient="split")
+    except Exception as e:
+        logging.error(f"Error parsing task_df_json: {e}")
+        return (
+            gr.update(),
+            gr.update(),
+            None,
+            f"Error parsing task data: {str(e)}",
+            None,
+        )
 
     # Log sequence numbers from JSON for debugging
     if debug:
@@ -88,11 +104,23 @@ async def show_solved(
         schedule_info=ScheduleInfo(total_slots=parameters.days_in_schedule * 16),
     )
 
-    # Wait for the solver
-    emp_df, solved_task_df, new_job_id, status = await solve_schedule(schedule, debug)
+    try:
+        # Wait for the solver
+        emp_df, solved_task_df, new_job_id, status = await solve_schedule(
+            schedule, debug
+        )
 
-    # Return the solved schedule
-    return emp_df, solved_task_df, new_job_id, status, task_df_json
+        # Return the solved schedule
+        return emp_df, solved_task_df, new_job_id, status, task_df_json
+    except Exception as e:
+        logging.error(f"Error in solve_schedule: {e}")
+        return (
+            gr.update(),
+            gr.update(),
+            None,
+            f"Error solving schedule: {str(e)}",
+            task_df_json,
+        )
 
 
 async def solve_schedule(

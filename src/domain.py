@@ -84,6 +84,7 @@ class AgentsConfig:
     request_timeout: int = 30
     max_tokens: int = 1024
     temperature: float = 0.1
+    workflow_timeout: int = 300  # 5 minutes for workflow timeout
 
     def __post_init__(self):
         """Validate required configuration"""

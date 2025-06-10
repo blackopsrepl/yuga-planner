@@ -130,9 +130,20 @@ async def generate_agent_data(file, project_id: str = "") -> EmployeeSchedule:
     )
     context = f"Project scheduling for {parameters.employee_count} employees over {parameters.days_in_schedule} days"
 
-    agent_output = await agent.run_workflow(
-        query=input_str, skills=available_skills, context=context
-    )
+    logging.info(f"Starting workflow with timeout: {AGENTS_CONFIG.workflow_timeout}s")
+    logging.info(f"Input length: {len(input_str)} characters")
+    logging.info(f"Available skills: {available_skills}")
+
+    try:
+        agent_output = await agent.run_workflow(
+            query=input_str, skills=available_skills, context=context
+        )
+        logging.info(
+            f"Workflow completed successfully. Generated {len(agent_output)} tasks."
+        )
+    except Exception as e:
+        logging.error(f"Workflow failed: {e}")
+        raise
 
     tasks = tasks_from_agent_output(agent_output, parameters, project_id)
     generate_employee_availability(employees, parameters, start_date, randomizer)
@@ -322,19 +333,6 @@ def tasks_from_agent_output(agent_output, parameters, project_id: str = ""):
 
 
 def skills_from_parameters(parameters: TimeTableDataParameters) -> list[str]:
-    return list(parameters.required_skills) + list(parameters.optional_skills)
-
-
-async def load_data(data_source_value, file_obj, llm_output):
-    if file_obj is None:
-        logging.warning("NO FILE OBJECT")
-        return gr.update(), gr.update(), None, gr.update(), gr.update()
-
-    schedule: EmployeeSchedule = await generate_agent_data(file_obj)
-
-    llm_output = [(task.description, task.duration_slots) for task in schedule.tasks]
-    llm_output_json = json.dumps(llm_output)
-
-    logging.info(f"RETURNING STATE: {llm_output_json}")
-
-    return gr.update(), gr.update(), None, gr.update(), llm_output_json
+    return list(parameters.skill_set.required_skills) + list(
+        parameters.skill_set.optional_skills
+    )

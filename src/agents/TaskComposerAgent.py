@@ -76,7 +76,7 @@ class TaskComposerAgent:
             task_splitter_template=self.task_splitter_template,
             task_evaluator_template=self.task_evaluator_template,
             task_deps_matcher_template=self.task_deps_matcher_template,
-            timeout=60,
+            timeout=self.config.workflow_timeout,
             verbose=True,
         )
 
@@ -157,14 +157,27 @@ class TaskComposerWorkflow(Workflow):
         result: list = analyzer.identify_lists()["Unordered list"]
         tasks: list[str] = unwrap_tasks_from_generated(result)
 
-        merged_tasks: list[tuple[str, str]] = []
-        for task in tasks:
-            formatted_prompt: str = self._task_evaluator_template.format(query=task)
+        logger.info(f"Processing {len(tasks)} tasks for time estimation...")
 
-            response = await asyncio.wait_for(
-                asyncio.to_thread(self._llm.complete, formatted_prompt), timeout=30.0
-            )
-            merged_tasks.append((task, response.text))
+        merged_tasks: list[tuple[str, str]] = []
+        for i, task in enumerate(tasks, 1):
+            try:
+                formatted_prompt: str = self._task_evaluator_template.format(query=task)
+
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(self._llm.complete, formatted_prompt),
+                    timeout=30.0,
+                )
+                merged_tasks.append((task, response.text))
+                logger.info(f"Completed time estimation {i}/{len(tasks)}")
+            except asyncio.TimeoutError:
+                logger.warning(f"Time estimation timeout for task {i}: {task[:50]}...")
+                # Use default duration of 2 units (1 hour)
+                merged_tasks.append((task, "2"))
+            except Exception as e:
+                logger.error(f"Error estimating time for task {i}: {e}")
+                # Use default duration of 2 units (1 hour)
+                merged_tasks.append((task, "2"))
 
         # remove markdown list elements wrapped in **
         merged_tasks = remove_markdown_list_elements(merged_tasks)
@@ -201,18 +214,36 @@ class TaskComposerWorkflow(Workflow):
         logger.info(f"Context: {context}")
 
         task_dependencies: list[tuple[str, str, str]] = []
-        for task, duration in event.task_evaluator_output:
-            formatted_prompt: str = self._task_deps_matcher_template.format(
-                task=task, skills=skills_str, context=context
-            )
+        logger.info(
+            f"Processing {len(event.task_evaluator_output)} tasks for skill matching..."
+        )
 
-            response = await asyncio.wait_for(
-                asyncio.to_thread(self._llm.complete, formatted_prompt), timeout=30.0
-            )
+        for i, (task, duration) in enumerate(event.task_evaluator_output, 1):
+            try:
+                formatted_prompt: str = self._task_deps_matcher_template.format(
+                    task=task, skills=skills_str, context=context
+                )
 
-            matched_skill = response.text.strip()
-            task_dependencies.append((task, duration, matched_skill))
-            logger.info(f"Task: {task[:50]}... -> Skill: {matched_skill}")
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(self._llm.complete, formatted_prompt),
+                    timeout=30.0,
+                )
+
+                matched_skill = response.text.strip()
+                task_dependencies.append((task, duration, matched_skill))
+                logger.info(
+                    f"Completed skill matching {i}/{len(event.task_evaluator_output)}: {task[:50]}... -> {matched_skill}"
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"Skill matching timeout for task {i}: {task[:50]}...")
+                # Use first available skill as fallback
+                fallback_skill = skills[0] if skills else ""
+                task_dependencies.append((task, duration, fallback_skill))
+            except Exception as e:
+                logger.error(f"Error matching skill for task {i}: {e}")
+                # Use first available skill as fallback
+                fallback_skill = skills[0] if skills else ""
+                task_dependencies.append((task, duration, fallback_skill))
 
         return TaskDependencyMatcher(task_dependency_output=task_dependencies)
 

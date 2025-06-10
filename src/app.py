@@ -102,7 +102,13 @@ def app(debug: bool = False):
         # State for LLM output, persists per session
         llm_output_state = gr.State(value=None)
         job_id_state = gr.State(value=None)
-        status_text = gr.Textbox(label="Solver Status", interactive=False)
+        status_text = gr.Textbox(
+            label="Solver Status",
+            interactive=False,
+            lines=8,
+            max_lines=20,
+            show_copy_button=True,
+        )
 
         with gr.Row():
             load_btn = gr.Button("Load Data")

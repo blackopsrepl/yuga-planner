@@ -340,6 +340,123 @@ def start_timer(job_id, llm_output) -> gr.Timer:
     return gr.Timer(active=True)
 
 
+def analyze_constraint_violations(solved_schedule: EmployeeSchedule) -> str:
+    """
+    Analyze a solved schedule to identify specific constraint violations.
+
+    This function examines a solved schedule to determine why hard constraints
+    were violated, helping users understand what makes their scheduling problem
+    infeasible.
+
+    Common reasons for infeasibility:
+    1. Not enough employees with required skills
+    2. Tasks require more time than available in the schedule window
+    3. Employee availability constraints conflict with task requirements
+    4. Tasks within a project cannot be sequenced due to time conflicts
+    5. Total task duration exceeds available employee time
+
+    Args:
+        solved_schedule: The solved EmployeeSchedule with potential violations
+
+    Returns:
+        str: Detailed description of constraint violations with actionable suggestions
+    """
+    violations = []
+
+    # Check for unassigned tasks (tasks without employees)
+    unassigned_tasks = [task for task in solved_schedule.tasks if task.employee is None]
+    if unassigned_tasks:
+        violations.append(
+            f"• {len(unassigned_tasks)} tasks could not be assigned to any employee"
+        )
+        # Show which skills are missing
+        required_skills = set(task.required_skill for task in unassigned_tasks)
+        available_skills = set()
+        for emp in solved_schedule.employees:
+            available_skills.update(emp.skills)
+        missing_skills = required_skills - available_skills
+        if missing_skills:
+            violations.append(f"  - Missing skills: {', '.join(missing_skills)}")
+
+    # Check for skill mismatches
+    skill_violations = [
+        task
+        for task in solved_schedule.tasks
+        if task.employee is not None and task.required_skill not in task.employee.skills
+    ]
+    if skill_violations:
+        violations.append(
+            f"• {len(skill_violations)} tasks assigned to employees without required skills"
+        )
+
+    # Check for tasks scheduled outside the time window
+    invalid_time_tasks = [
+        task
+        for task in solved_schedule.tasks
+        if task.start_slot < 0
+        or (task.start_slot + task.duration_slots)
+        > solved_schedule.schedule_info.total_slots
+    ]
+    if invalid_time_tasks:
+        violations.append(
+            f"• {len(invalid_time_tasks)} tasks scheduled outside the available time window"
+        )
+        total_task_hours = (
+            sum(task.duration_slots for task in solved_schedule.tasks) * 0.5
+        )
+        total_available_hours = (
+            solved_schedule.schedule_info.total_slots
+            * len(solved_schedule.employees)
+            * 0.5
+        )
+        violations.append(f"  - Total task time needed: {total_task_hours:.1f} hours")
+        violations.append(
+            f"  - Total available time: {total_available_hours:.1f} hours"
+        )
+
+    # Check for overlapping tasks for the same employee
+    overlapping_tasks = []
+    employee_tasks = {}
+    for task in solved_schedule.tasks:
+        if task.employee is not None:
+            if task.employee.name not in employee_tasks:
+                employee_tasks[task.employee.name] = []
+            employee_tasks[task.employee.name].append(task)
+
+    for employee_name, tasks in employee_tasks.items():
+        for i, task1 in enumerate(tasks):
+            for task2 in tasks[i + 1 :]:
+                if (
+                    task1.start_slot < task2.start_slot + task2.duration_slots
+                    and task2.start_slot < task1.start_slot + task1.duration_slots
+                ):
+                    overlapping_tasks.append((task1, task2))
+
+    if overlapping_tasks:
+        violations.append(
+            f"• {len(overlapping_tasks)} pairs of tasks overlap for the same employee"
+        )
+
+    # Check for tasks scheduled during employee unavailable dates
+    from constraint_solvers.timetable.constraints import get_slot_date
+
+    unavailable_violations = [
+        task
+        for task in solved_schedule.tasks
+        if task.employee is not None
+        and get_slot_date(task.start_slot) in task.employee.unavailable_dates
+    ]
+    if unavailable_violations:
+        violations.append(
+            f"• {len(unavailable_violations)} tasks scheduled when employees are unavailable"
+        )
+
+    if violations:
+        return "Specific constraint violations:\n" + "\n".join(violations)
+    else:
+        return "No specific violations detected (solver may have other internal constraints)."
+
+
 def poll_solution(
     job_id: str, schedule: EmployeeSchedule, debug: bool = False
 ) -> Tuple[pd.DataFrame, pd.DataFrame, str, str, object]:
@@ -381,7 +498,26 @@ def poll_solution(
             ]
         ].sort_values(["Start"])
 
-        return emp_df, task_df, job_id, "Solved!", solved_schedule
+        # Check if hard constraints are violated (infeasible solution)
+        status_message = "Solved!"
+        if solved_schedule.score is not None:
+            hard_score = solved_schedule.score.hard_score
+            if hard_score < 0:
+                # Hard constraints are violated - the problem is infeasible
+                violation_count = abs(int(hard_score))
+                violation_details = analyze_constraint_violations(solved_schedule)
+                status_message = f"⚠️ CONSTRAINTS VIOLATED: {violation_count} hard constraint(s) could not be satisfied. The schedule is not feasible.\n\n{violation_details}\n\nSuggestions:\n• Add more employees with required skills\n• Increase the scheduling time window\n• Reduce task requirements or durations\n• Check employee availability constraints"
+                logging.warning(
+                    f"Infeasible solution detected. Hard score: {hard_score}"
+                )
+            else:
+                soft_score = solved_schedule.score.soft_score
+                status_message = f"✅ Solved successfully! Score: {hard_score}/{soft_score} (hard/soft)"
+                logging.info(
+                    f"Feasible solution found. Score: {hard_score}/{soft_score}"
+                )
+
+        return emp_df, task_df, job_id, status_message, solved_schedule
 
     return None, None, job_id, "Solving...", schedule
 
@@ -403,11 +539,30 @@ async def auto_poll(
                 logging.info(f"Polling for job {job_id}")
                 logging.info(f"Current schedule state: {task_df.head()}")
 
+            # Check if hard constraints are violated (infeasible solution)
+            status_message = "Solution updated"
+            if schedule.score is not None:
+                hard_score = schedule.score.hard_score
+                if hard_score < 0:
+                    # Hard constraints are violated - the problem is infeasible
+                    violation_count = abs(int(hard_score))
+                    violation_details = analyze_constraint_violations(schedule)
+                    status_message = f"⚠️ CONSTRAINTS VIOLATED: {violation_count} hard constraint(s) could not be satisfied. The schedule is not feasible.\n\n{violation_details}\n\nSuggestions:\n• Add more employees with required skills\n• Increase the scheduling time window\n• Reduce task requirements or durations\n• Check employee availability constraints"
+                    logging.warning(
+                        f"Infeasible solution detected. Hard score: {hard_score}"
+                    )
+                else:
+                    soft_score = schedule.score.soft_score
+                    status_message = f"✅ Solved successfully! Score: {hard_score}/{soft_score} (hard/soft)"
+                    logging.info(
+                        f"Feasible solution found. Score: {hard_score}/{soft_score}"
+                    )
+
             return (
                 emp_df,  # employees_table
                 task_df,  # schedule_table
                 job_id,  # job_id_state
-                "Solution updated",  # status_text
+                status_message,  # status_text
                 llm_output,  # llm_output_state
             )
     except Exception as e:
@@ -421,3 +576,51 @@ async def auto_poll(
         )
 
     return (gr.update(), gr.update(), None, "No updates", llm_output)
+
+
+"""
+CONSTRAINT VIOLATION DETECTION SYSTEM
+
+This module implements automatic detection of infeasible scheduling problems.
+When the Timefold solver cannot satisfy all hard constraints, it returns a
+solution with a negative hard score. This system analyzes such solutions to
+provide users with specific, actionable feedback about why their scheduling
+problem cannot be solved.
+
+HOW IT WORKS:
+1. After solving, check if solution.score.hard_score() < 0
+2. If negative, analyze the solution to identify specific violations
+3. Provide detailed feedback and suggestions to the user
+
+EXAMPLE SCENARIOS WHERE CONSTRAINTS ARE VIOLATED:
+
+Scenario 1 - Missing Skills:
+- Task requires "AI Engineer" skill
+- No employees have this skill
+- Result: Task cannot be assigned → infeasible
+
+Scenario 2 - Insufficient Time:
+- 10 tasks requiring 8 hours each (80 hours total)
+- 5 employees working 2 days (80 slots = 40 hours total)
+- Result: Not enough time to complete all tasks → infeasible
+
+Scenario 3 - Availability Conflicts:
+- Critical task must be done by specific employee
+- Employee is unavailable during the entire schedule period
+- Result: Task cannot be scheduled → infeasible
+
+Scenario 4 - Project Sequencing Impossible:
+- Project has Task A → Task B → Task C sequence
+- Time window too short to complete sequence
+- Result: Sequence constraints cannot be satisfied → infeasible
+
+USER FEEDBACK:
+When constraints are violated, users see:
+- ⚠️ Warning that constraints are violated
+- Specific count of violations
+- Detailed breakdown of what went wrong
+- Actionable suggestions for fixing the problem
+
+This helps users understand exactly what needs to be changed to make
+their scheduling problem solvable.
+"""

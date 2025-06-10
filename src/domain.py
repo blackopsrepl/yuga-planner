@@ -15,6 +15,12 @@ class AgentsConfig:
     task_evaluator_prompt: str = "Evaluate the elapsed time, in 30 minute units, for a competent human to complete the following task:\n{{query}}\n\nYour output must be a one integer, with no additional comments.\n\n"
     task_deps_matcher_prompt: str = "Given the following task:\n{{task}}\n\nAnd these available skills:\n{{skills}}\n\nIn this context:\n{{context}}\n\nSelect the most appropriate skill to complete this task. Return only the skill name as a string, with no additional comments or formatting.\n\n"
 
+    # Mock projects
+    MOCK_PROJECTS: dict[str, str] = {
+        "go-rssagg": """GO-RSSAGG\n\nRSS aggregator backend written in Go. Features REST API and basic authentication""",
+        "rust": """RUST PROJECT\n\nData Pipeline that extracts chess match metrics and match annotations from Excel files, using AWS Lambda and Step Functions and written in Rust""",
+    }
+
     # LLM settings
     timeout: int = 30
     max_retries: int = 3

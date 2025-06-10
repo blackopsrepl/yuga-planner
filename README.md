@@ -62,7 +62,8 @@ It takes a project description file such as a README.md file, breaks it down int
 
 ### Future Work
 
-- **More granular task dependency** representation of tasks in a tree instead of a list to allow overlap within projects, where feasible/convenient
+- **RAG:** validation of task decomposition and estimation against industry relevant literature
+- **More granular task dependency:** representation of tasks in a tree instead of a list to allow overlap within projects, where feasible/convenient
 - **Input from GitHub issues:** instead of processing markdown directly, it creates a list by parsing issue
 - **Chat interface:** detection of user intent, with on-the-fly CRUD operations on team, tasks and schedules
 - **Reinforcement learning:** training the agent to improve task decomposition and estimation from GitHub history (e.g. diffs in timestamps, issue comments etc.)

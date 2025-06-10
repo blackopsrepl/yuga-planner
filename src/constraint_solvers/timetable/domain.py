@@ -52,6 +52,8 @@ class Task:
         int, PlanningVariable(value_range_provider_refs=["startSlotRange"])
     ]  # Slot index when the task starts
     required_skill: str
+    # Identifier for the project this task belongs to (set by the UI when loading multiple project files)
+    project_id: str = ""
     employee: Annotated[
         Employee | None, PlanningVariable(value_range_provider_refs=["employeeRange"])
     ] = None
@@ -63,6 +65,7 @@ class Task:
             "duration_slots": self.duration_slots,
             "start_slot": self.start_slot,
             "required_skill": self.required_skill,
+            "project_id": self.project_id,
             "employee": self.employee.to_dict() if self.employee else None,
         }
 
@@ -74,6 +77,7 @@ class Task:
             duration_slots=d["duration_slots"],
             start_slot=d["start_slot"],
             required_skill=d["required_skill"],
+            project_id=d.get("project_id", ""),
             employee=Employee.from_dict(d["employee"]) if d["employee"] else None,
         )
 

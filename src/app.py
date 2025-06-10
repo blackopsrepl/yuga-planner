@@ -27,11 +27,17 @@ from factory.data_provider import (
     DATA_PARAMS,
     generate_employees,
     generate_employee_availability,
+    TimeTableDataParameters,
 )
 
 
 from constraint_solvers.timetable.solver import solver_manager
-from constraint_solvers.timetable.domain import EmployeeSchedule, ScheduleInfo, Task
+from constraint_solvers.timetable.domain import (
+    EmployeeSchedule,
+    ScheduleInfo,
+    Task,
+    Employee,
+)
 
 solved_schedules: dict[str, EmployeeSchedule] = {}
 
@@ -54,9 +60,9 @@ def app():
         gr.Markdown("### SWE Team Task Scheduling Demo")
 
         file_upload = gr.File(
-            label="Upload Project File (Markdown)",
+            label="Upload Project Files (Markdown)",
             file_types=[".md"],
-            file_count="single",
+            file_count="multiple",
             visible=True,
         )
 
@@ -160,17 +166,18 @@ async def show_solved(
     ids = (str(i) for i in range(len(task_df)))
 
     # Generate tasks from the DataFrame
-    tasks = [
-        Task(
-            id=next(ids),
-            description=row["Task"],
-            # Convert hours back to slots
-            duration_slots=int(float(row["Duration (hours)"]) * 2),
-            start_slot=0,
-            required_skill=row["Required Skill"],
+    tasks = []
+    for _, row in task_df.iterrows():
+        tasks.append(
+            Task(
+                id=next(ids),
+                description=row["Task"],
+                duration_slots=int(float(row["Duration (hours)"]) * 2),
+                start_slot=0,
+                required_skill=row["Required Skill"],
+                project_id=row.get("Project", ""),
+            )
         )
-        for _, row in task_df.iterrows()
-    ]
 
     # Generate employee availability preferences
     #
@@ -207,8 +214,16 @@ async def solve_schedule(schedule) -> tuple[pd.DataFrame, pd.DataFrame, str, str
     task_df = schedule_to_dataframe(schedule)
 
     task_df = task_df[
-        ["Employee", "Task", "Start", "End", "Duration (hours)", "Required Skill"]
-    ].sort_values(["Employee", "Start"])
+        [
+            "Project",
+            "Employee",
+            "Task",
+            "Start",
+            "End",
+            "Duration (hours)",
+            "Required Skill",
+        ]
+    ].sort_values(["Project", "Employee", "Start"])
 
     return emp_df, task_df, job_id, "Solving..."
 
@@ -228,16 +243,54 @@ async def load_data(file_obj, llm_output):
             gr.update(),
         )
 
-    schedule = await generate_agent_data(file_obj)
+    # Support multiple files. Gradio returns a list when multiple files are selected.
+    files = file_obj if isinstance(file_obj, list) else [file_obj]
 
-    emp_df: pd.DataFrame = employees_to_dataframe(schedule)
-    task_df: pd.DataFrame = schedule_to_dataframe(schedule)
+    combined_tasks: list[Task] = []
+    combined_employees: dict[str, Employee] = {}
+
+    for idx, single_file in enumerate(files):
+        # Derive a project ID from the filename (fallback to index)
+        try:
+            project_id = os.path.splitext(os.path.basename(single_file.name))[0]
+        except AttributeError:
+            project_id = f"project_{idx+1}"
+
+        schedule_part: EmployeeSchedule = await generate_agent_data(
+            single_file, project_id=project_id
+        )
+
+        # Merge employees (unique by name)
+        for emp in schedule_part.employees:
+            if emp.name not in combined_employees:
+                combined_employees[emp.name] = emp
+
+        # Append tasks with project id already set
+        combined_tasks.extend(schedule_part.tasks)
+
+    parameters: TimeTableDataParameters = DATA_PARAMS
+    final_schedule: EmployeeSchedule = EmployeeSchedule(
+        employees=list(combined_employees.values()),
+        tasks=combined_tasks,
+        schedule_info=ScheduleInfo(total_slots=parameters.days_in_schedule * 16),
+    )
+
+    emp_df: pd.DataFrame = employees_to_dataframe(final_schedule)
+    task_df: pd.DataFrame = schedule_to_dataframe(final_schedule)
 
     # Sort the tasks by employee and start time
     # TODO: should have task dependency constraints, but we don't have that yet
     task_df: pd.DataFrame = task_df[
-        ["Employee", "Task", "Start", "End", "Duration (hours)", "Required Skill"]
-    ].sort_values(["Employee", "Start"])
+        [
+            "Project",
+            "Employee",
+            "Task",
+            "Start",
+            "End",
+            "Duration (hours)",
+            "Required Skill",
+        ]
+    ].sort_values(["Project", "Employee", "Start"])
 
     # Convert to JSON
     task_df_json: str = task_df.to_json(orient="split")
@@ -274,8 +327,16 @@ def poll_solution(
         task_df: pd.DataFrame = schedule_to_dataframe(solved_schedule)
 
         task_df: pd.DataFrame = task_df[
-            ["Employee", "Task", "Start", "End", "Duration (hours)", "Required Skill"]
-        ].sort_values(["Employee", "Start"])
+            [
+                "Project",
+                "Employee",
+                "Task",
+                "Start",
+                "End",
+                "Duration (hours)",
+                "Required Skill",
+            ]
+        ].sort_values(["Project", "Employee", "Start"])
 
         return emp_df, task_df, job_id, "Solved!", solved_schedule
 
@@ -333,6 +394,7 @@ def schedule_to_dataframe(schedule) -> pd.DataFrame:
         # Add task data to list with availability flags
         data.append(
             {
+                "Project": getattr(task, "project_id", ""),
                 "Employee": employee,
                 "Task": task.description,
                 "Start": start_time,

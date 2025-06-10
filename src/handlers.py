@@ -32,12 +32,26 @@ solved_schedules: Dict[str, EmployeeSchedule] = {}
 
 
 async def show_solved(
-    task_df_json: str, job_id: str, debug: bool = False
+    state_data, job_id: str, debug: bool = False
 ) -> Tuple[pd.DataFrame, pd.DataFrame, str, str, object]:
     # Add debugging to understand what's happening
     logging.info(
-        f"show_solved called with task_df_json type: {type(task_df_json)}, job_id: {job_id}"
+        f"show_solved called with state_data type: {type(state_data)}, job_id: {job_id}"
     )
+
+    # Handle both old format (string) and new format (dict) for backward compatibility
+    if isinstance(state_data, str):
+        task_df_json = state_data
+        employee_count = None
+        days_in_schedule = None
+    elif isinstance(state_data, dict):
+        task_df_json = state_data.get("task_df_json")
+        employee_count = state_data.get("employee_count")
+        days_in_schedule = state_data.get("days_in_schedule")
+    else:
+        task_df_json = None
+        employee_count = None
+        days_in_schedule = None
 
     # Dataframe from JSON debug logging
     if debug:
@@ -74,6 +88,22 @@ async def show_solved(
             )
 
     parameters: TimeTableDataParameters = DATA_PARAMS
+
+    # Override parameters if provided from UI
+    if employee_count is not None or days_in_schedule is not None:
+        parameters = TimeTableDataParameters(
+            skill_set=parameters.skill_set,
+            days_in_schedule=days_in_schedule
+            if days_in_schedule is not None
+            else parameters.days_in_schedule,
+            employee_count=employee_count
+            if employee_count is not None
+            else parameters.employee_count,
+            optional_skill_distribution=parameters.optional_skill_distribution,
+            availability_count_distribution=parameters.availability_count_distribution,
+            random_seed=parameters.random_seed,
+        )
+
     start_date = datetime.now().date()
     randomizer = random.Random(parameters.random_seed)
     employees = generate_employees(parameters, randomizer)
@@ -111,7 +141,7 @@ async def show_solved(
         )
 
         # Return the solved schedule
-        return emp_df, solved_task_df, new_job_id, status, task_df_json
+        return emp_df, solved_task_df, new_job_id, status, state_data
     except Exception as e:
         logging.error(f"Error in solve_schedule: {e}")
         return (
@@ -119,7 +149,7 @@ async def show_solved(
             gr.update(),
             None,
             f"Error solving schedule: {str(e)}",
-            task_df_json,
+            state_data,
         )
 
 
@@ -189,7 +219,13 @@ def show_mock_project_content(project_names) -> str:
 
 
 async def load_data(
-    project_source: str, file_obj, mock_projects, llm_output, debug: bool = False
+    project_source: str,
+    file_obj,
+    mock_projects,
+    employee_count: int,
+    days_in_schedule: int,
+    llm_output,
+    debug: bool = False,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, gr.update, str, dict]:
     """
     Handle data loading from either file uploads or mock projects
@@ -264,7 +300,10 @@ async def load_data(
                 project_id = mock_projects[idx]
 
             schedule_part: EmployeeSchedule = await generate_agent_data(
-                single_file, project_id=project_id
+                single_file,
+                project_id=project_id,
+                employee_count=employee_count,
+                days_in_schedule=days_in_schedule,
             )
 
             # Merge employees (unique by name)
@@ -276,6 +315,22 @@ async def load_data(
             combined_tasks.extend(schedule_part.tasks)
 
         parameters: TimeTableDataParameters = DATA_PARAMS
+
+        # Override with custom parameters if provided
+        if employee_count is not None or days_in_schedule is not None:
+            parameters = TimeTableDataParameters(
+                skill_set=parameters.skill_set,
+                days_in_schedule=days_in_schedule
+                if days_in_schedule is not None
+                else parameters.days_in_schedule,
+                employee_count=employee_count
+                if employee_count is not None
+                else parameters.employee_count,
+                optional_skill_distribution=parameters.optional_skill_distribution,
+                availability_count_distribution=parameters.availability_count_distribution,
+                random_seed=parameters.random_seed,
+            )
+
         final_schedule: EmployeeSchedule = EmployeeSchedule(
             employees=list(combined_employees.values()),
             tasks=combined_tasks,
@@ -314,15 +369,19 @@ async def load_data(
         job_id = str(uuid.uuid4())
         solved_schedules[job_id] = final_schedule
 
-        # Convert to JSON for state
-        task_df_json: str = task_df.to_json(orient="split")
+        # Convert to JSON for state and include parameters
+        state_data = {
+            "task_df_json": task_df.to_json(orient="split"),
+            "employee_count": employee_count,
+            "days_in_schedule": days_in_schedule,
+        }
 
         return (
             emp_df,  # employees_table
             task_df,  # schedule_table
             job_id,  # job_id_state
             f"Data loaded successfully from {project_source_info}",  # status_text
-            task_df_json,  # llm_output_state
+            state_data,  # llm_output_state
         )
 
     except Exception as e:

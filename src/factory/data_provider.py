@@ -78,8 +78,8 @@ SKILL_SET = SkillSet(
 
 DATA_PARAMS = TimeTableDataParameters(
     skill_set=SKILL_SET,
-    days_in_schedule=28,
-    employee_count=50,
+    days_in_schedule=365,
+    employee_count=12,
     optional_skill_distribution=(
         CountDistribution(count=1, weight=3),
         CountDistribution(count=2, weight=1),
@@ -96,11 +96,29 @@ DATA_PARAMS = TimeTableDataParameters(
 # =========================
 #        AGENT DATA
 # =========================
-async def generate_agent_data(file, project_id: str = "") -> EmployeeSchedule:
+async def generate_agent_data(
+    file, project_id: str = "", employee_count: int = None, days_in_schedule: int = None
+) -> EmployeeSchedule:
     """
     Generates an EmployeeSchedule using tasks from TaskComposerAgent output.
     """
     parameters: TimeTableDataParameters = DATA_PARAMS
+
+    # Override parameters if provided
+    if employee_count is not None or days_in_schedule is not None:
+        parameters = TimeTableDataParameters(
+            skill_set=parameters.skill_set,
+            days_in_schedule=days_in_schedule
+            if days_in_schedule is not None
+            else parameters.days_in_schedule,
+            employee_count=employee_count
+            if employee_count is not None
+            else parameters.employee_count,
+            optional_skill_distribution=parameters.optional_skill_distribution,
+            availability_count_distribution=parameters.availability_count_distribution,
+            random_seed=parameters.random_seed,
+        )
+
     start_date: date = earliest_monday_on_or_after(date.today())
     randomizer: Random = Random(parameters.random_seed)
     employees: list[Employee] = generate_employees(parameters, randomizer)
@@ -174,6 +192,10 @@ def generate_employees(
             population=counts(parameters.optional_skill_distribution),
             weights=weights(parameters.optional_skill_distribution),
         )
+
+        # Ensure we don't try to sample more skills than available
+        count = min(count, len(parameters.skill_set.optional_skills))
+
         skills = []
         skills += random.sample(parameters.skill_set.optional_skills, count)
         skills += random.sample(parameters.skill_set.required_skills, 1)
@@ -198,6 +220,9 @@ def generate_employee_availability(
             population=counts(parameters.availability_count_distribution),
             weights=weights(parameters.availability_count_distribution),
         )
+
+        # Ensure we don't try to sample more employees than we have
+        count = min(count, len(employees))
 
         employees_with_availabilities_on_day = random.sample(employees, count)
 

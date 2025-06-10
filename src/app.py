@@ -54,6 +54,25 @@ def app(debug: bool = False):
             label="Project Source",
         )
 
+        # Configuration parameters
+        with gr.Row():
+            employee_count = gr.Number(
+                label="Number of Employees",
+                value=10,
+                minimum=1,
+                maximum=100,
+                step=1,
+                precision=0,
+            )
+            days_in_schedule = gr.Number(
+                label="Days in Schedule",
+                value=60,
+                minimum=1,
+                maximum=365,
+                step=1,
+                precision=0,
+            )
+
         # File upload component (initially visible)
         with gr.Group(visible=True) as file_upload_group:
             file_upload = gr.File(
@@ -140,6 +159,8 @@ def app(debug: bool = False):
                 project_source,
                 file_upload,
                 mock_project_dropdown,
+                employee_count,
+                days_in_schedule,
                 llm_output_state,
             ],
             outputs=outputs,

@@ -54,6 +54,10 @@ It takes a project description file such as a README.md file, breaks it down int
 | **Constraint-Based Scheduling** | [Timefold](http://www.timefold.ai) optimization engine for schedule assignments | ✅ |
 | **Skills Matching** | Detection of skills required for each task | ✅ |
 | **Task Dependencies** | Sequential workflow modeling | ✅ |
+| **Multiple Projects Support** | Load and schedule multiple projects simultaneously | ✅ |
+| **Live Log Streaming** | Real-time solver progress and status updates in UI | ✅ |
+| **Configurable Parameters** | Adjustable employee count and schedule duration | ✅ |
+| **Mock Project Loading** | Pre-configured sample projects for quick testing | ✅ |
 
 ### Work in Progress
 

@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.2.1](///compare/v1.2.0...v1.2.1) (2025-06-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* add live log streaming to the UI
+* reduce hard penality of overlapping tasks
+
+### Features
+
+* add configurable employee count and schedule days ba9a984
+* add live log streaming to the UI f77d330
+* add mock project loading functionality 200196d
+* add mock projects to config 4634124
+* add scaling of employee availability generation fc20e9b
+* improve solver status and constraint analysis 77b90d2
+
+
+### Bug Fixes
+
+* improve UI and schedule data handling, restore global state object 8aa0c1d
+* reduce hard penality of overlapping tasks 32df40d
+
 ## [1.2.0](///compare/v1.1.0...v1.2.0) (2025-06-10)
 
 

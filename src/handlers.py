@@ -23,6 +23,7 @@ from constraint_solvers.timetable.domain import (
     Employee,
 )
 from constraint_solvers.timetable.solver import solver_manager
+from domain import MOCK_PROJECTS
 
 from helpers import schedule_to_dataframe, employees_to_dataframe
 
@@ -130,38 +131,109 @@ async def solve_schedule(
     return emp_df, task_df, job_id, "Solving..."
 
 
+def show_mock_project_content(project_names) -> str:
+    """
+    Display the content of selected mock projects.
+    """
+    if not project_names:
+        return "No projects selected."
+
+    # Handle both single string and list of strings
+    if isinstance(project_names, str):
+        project_names = [project_names]
+
+    content_parts = []
+    for project_name in project_names:
+        if project_name in MOCK_PROJECTS:
+            content_parts.append(
+                f"=== {project_name.upper()} ===\n\n{MOCK_PROJECTS[project_name]}"
+            )
+        else:
+            content_parts.append(
+                f"=== {project_name.upper()} ===\n\nProject not found."
+            )
+
+    return (
+        "\n\n" + "=" * 50 + "\n\n".join(content_parts)
+        if content_parts
+        else "No valid projects selected."
+    )
+
+
 async def load_data(
-    file_obj, llm_output, debug: bool = False
+    project_source: str, file_obj, mock_projects, llm_output, debug: bool = False
 ) -> Tuple[pd.DataFrame, pd.DataFrame, gr.update, str, dict]:
     """
-    Handle data loading
+    Handle data loading from either file uploads or mock projects
     Returns (employees_table, schedule_table, job_id_state, status_text, llm_output_state)
     """
-    if file_obj is None:
-        logging.error(
-            "NO FILE OBJECT: User attempted to load data without uploading a file."
-        )
-        return (
-            gr.update(),
-            gr.update(),
-            gr.update(),
-            "No file uploaded. Please upload a file.",
-            gr.update(),
-        )
-
     try:
-        # Support multiple files. Gradio returns a list when multiple files are selected.
-        files = file_obj if isinstance(file_obj, list) else [file_obj]
+        if project_source == "Upload Project Files":
+            # Handle file upload option
+            if file_obj is None:
+                logging.error(
+                    "NO FILE OBJECT: User attempted to load data without uploading a file."
+                )
+                return (
+                    gr.update(),
+                    gr.update(),
+                    gr.update(),
+                    "No file uploaded. Please upload a file.",
+                    gr.update(),
+                )
+
+            # Support multiple files. Gradio returns a list when multiple files are selected.
+            files = file_obj if isinstance(file_obj, list) else [file_obj]
+            project_source_info = f"{len(files)} file(s)"
+        else:
+            # Handle mock project option
+            if not mock_projects:
+                logging.error(
+                    "INVALID MOCK PROJECT: User didn't select any mock projects"
+                )
+                return (
+                    gr.update(),
+                    gr.update(),
+                    gr.update(),
+                    "Please select at least one mock project.",
+                    gr.update(),
+                )
+
+            # Ensure mock_projects is a list
+            if isinstance(mock_projects, str):
+                mock_projects = [mock_projects]
+
+            # Validate all selected mock projects
+            invalid_projects = [p for p in mock_projects if p not in MOCK_PROJECTS]
+            if invalid_projects:
+                logging.error(f"INVALID MOCK PROJECTS: {invalid_projects}")
+                return (
+                    gr.update(),
+                    gr.update(),
+                    gr.update(),
+                    f"Invalid mock projects selected: {', '.join(invalid_projects)}",
+                    gr.update(),
+                )
+
+            # Create file content list from selected mock projects
+            files = [MOCK_PROJECTS[project] for project in mock_projects]
+            project_source_info = (
+                f"{len(mock_projects)} mock project(s): {', '.join(mock_projects)}"
+            )
 
         combined_tasks: List[Task] = []
         combined_employees: Dict[str, Employee] = {}
 
         for idx, single_file in enumerate(files):
             # Derive a project ID from the filename (fallback to index)
-            try:
-                project_id = os.path.splitext(os.path.basename(single_file.name))[0]
-            except AttributeError:
-                project_id = f"project_{idx+1}"
+            if project_source == "Upload Project Files":
+                try:
+                    project_id = os.path.splitext(os.path.basename(single_file.name))[0]
+                except AttributeError:
+                    project_id = f"project_{idx+1}"
+            else:
+                # For mock projects, use the mock project name as the project ID
+                project_id = mock_projects[idx]
 
             schedule_part: EmployeeSchedule = await generate_agent_data(
                 single_file, project_id=project_id
@@ -221,7 +293,7 @@ async def load_data(
             emp_df,  # employees_table
             task_df,  # schedule_table
             job_id,  # job_id_state
-            "Data loaded successfully",  # status_text
+            f"Data loaded successfully from {project_source_info}",  # status_text
             task_df_json,  # llm_output_state
         )
 

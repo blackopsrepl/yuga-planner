@@ -15,9 +15,11 @@ from handlers import (
     show_solved,
     start_timer,
     auto_poll,
+    show_mock_project_content,
 )
 
 from state import app_state
+from domain import MOCK_PROJECTS
 
 
 # =========================
@@ -35,15 +37,66 @@ def app(debug: bool = False):
         )
         gr.Markdown("### SWE Team Task Scheduling Demo")
 
-        file_upload = gr.File(
-            label="Upload Project Files (Markdown)",
-            file_types=[".md"],
-            file_count="multiple",
-            visible=True,
+        gr.Markdown(
+            """
+            ## Instructions
+            1. Choose a project source - either upload your own project file(s) or select from our mock projects
+            2. Click 'Load Data' to parse, decompose, and estimate tasks
+            3. Click 'Solve' to generate an optimal schedule based on employee skills and availability
+            4. Review the results in the tables below
+            """
         )
 
-        gr.Markdown(
-            "Upload a project description in Markdown format, click 'Load Data' to parse, decompose, and estimate tasks. Click 'Solve' to generate an optimal schedule."
+        # Project source selector
+        project_source = gr.Radio(
+            choices=["Upload Project Files", "Use Mock Projects"],
+            value="Upload Project Files",
+            label="Project Source",
+        )
+
+        # File upload component (initially visible)
+        with gr.Group(visible=True) as file_upload_group:
+            file_upload = gr.File(
+                label="Upload Project Files (Markdown)",
+                file_types=[".md"],
+                file_count="multiple",
+            )
+
+        # Mock projects dropdown (initially hidden)
+        with gr.Group(visible=False) as mock_projects_group:
+            mock_project_dropdown = gr.Dropdown(
+                choices=list(MOCK_PROJECTS.keys()),
+                label="Select Mock Projects (multiple selection allowed)",
+                value=[list(MOCK_PROJECTS.keys())[0]] if MOCK_PROJECTS else [],
+                multiselect=True,
+            )
+
+            # Display for mock project content
+            mock_project_content = gr.Textbox(
+                label="Project Content Preview", interactive=False, lines=8
+            )
+
+            # Link to view content
+            view_content_btn = gr.Button("View Selected Projects Content")
+
+            # Link mock project dropdown to content display
+            view_content_btn.click(
+                show_mock_project_content,
+                inputs=[mock_project_dropdown],
+                outputs=[mock_project_content],
+            )
+
+        # Toggle visibility based on project source selection
+        def toggle_visibility(choice):
+            if choice == "Upload Project Files":
+                return gr.update(visible=True), gr.update(visible=False)
+            else:
+                return gr.update(visible=False), gr.update(visible=True)
+
+        project_source.change(
+            toggle_visibility,
+            inputs=[project_source],
+            outputs=[file_upload_group, mock_projects_group],
         )
 
         # State for LLM output, persists per session
@@ -77,7 +130,12 @@ def app(debug: bool = False):
         # Use state as both input and output
         load_btn.click(
             load_data,
-            inputs=[file_upload, llm_output_state],
+            inputs=[
+                project_source,
+                file_upload,
+                mock_project_dropdown,
+                llm_output_state,
+            ],
             outputs=outputs,
             api_name="load_data",
         )

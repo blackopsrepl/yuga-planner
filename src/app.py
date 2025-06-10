@@ -223,7 +223,7 @@ async def solve_schedule(schedule) -> tuple[pd.DataFrame, pd.DataFrame, str, str
             "Duration (hours)",
             "Required Skill",
         ]
-    ].sort_values(["Project", "Employee", "Start"])
+    ].sort_values(["Start"])
 
     return emp_df, task_df, job_id, "Solving..."
 
@@ -278,7 +278,7 @@ async def load_data(file_obj, llm_output):
     emp_df: pd.DataFrame = employees_to_dataframe(final_schedule)
     task_df: pd.DataFrame = schedule_to_dataframe(final_schedule)
 
-    # Sort the tasks by employee and start time
+    # Sort the tasks by start time
     # TODO: should have task dependency constraints, but we don't have that yet
     task_df: pd.DataFrame = task_df[
         [
@@ -290,7 +290,7 @@ async def load_data(file_obj, llm_output):
             "Duration (hours)",
             "Required Skill",
         ]
-    ].sort_values(["Project", "Employee", "Start"])
+    ].sort_values(["Start"])
 
     # Convert to JSON
     task_df_json: str = task_df.to_json(orient="split")
@@ -336,7 +336,7 @@ def poll_solution(
                 "Duration (hours)",
                 "Required Skill",
             ]
-        ].sort_values(["Project", "Employee", "Start"])
+        ].sort_values(["Start"])
 
         return emp_df, task_df, job_id, "Solved!", solved_schedule
 

@@ -1,6 +1,8 @@
 import os, random, uuid, logging
 from io import StringIO
 from datetime import datetime
+import threading
+import time
 
 from typing import Tuple, Dict, List, Optional
 
@@ -31,13 +33,83 @@ from constraint_solvers.timetable.domain import (
 )
 
 
+class LogCapture:
+    """Helper class to capture logs for streaming to UI"""
+
+    def __init__(self):
+        self.logs = []
+        self.lock = threading.Lock()
+
+    def add_log(self, message):
+        with self.lock:
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            self.logs.append(f"[{timestamp}] {message}")
+
+    def get_logs(self):
+        with self.lock:
+            return "\n".join(self.logs)
+
+    def clear(self):
+        with self.lock:
+            self.logs.clear()
+
+
+class StreamingLogHandler(logging.Handler):
+    """Custom log handler that captures logs for UI streaming"""
+
+    def __init__(self, log_capture):
+        super().__init__()
+        self.log_capture = log_capture
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            self.log_capture.add_log(msg)
+        except Exception:
+            self.handleError(record)
+
+
+# Global log capture instance for streaming
+log_capture = LogCapture()
+
+
+def setup_log_streaming():
+    """Set up log streaming to capture logs for UI"""
+    logger = logging.getLogger()
+    # Remove existing handlers to avoid duplicate logs
+    for handler in logger.handlers[:]:
+        if isinstance(handler, StreamingLogHandler):
+            logger.removeHandler(handler)
+
+    # Add our streaming handler
+    stream_handler = StreamingLogHandler(log_capture)
+    stream_handler.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(levelname)s - %(message)s")
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
+
+
+def get_streaming_logs():
+    """Get accumulated logs for streaming to UI"""
+    return log_capture.get_logs()
+
+
+def clear_streaming_logs():
+    """Clear accumulated logs"""
+    log_capture.clear()
+
+
 async def show_solved(
     state_data, job_id: str, debug: bool = False
-) -> Tuple[pd.DataFrame, pd.DataFrame, str, str, object]:
+) -> Tuple[pd.DataFrame, pd.DataFrame, str, str, object, str]:
+    # Set up log streaming for solving process
+    setup_log_streaming()
+
     # Add debugging to understand what's happening
     logging.info(
-        f"show_solved called with state_data type: {type(state_data)}, job_id: {job_id}"
+        f"🔧 show_solved called with state_data type: {type(state_data)}, job_id: {job_id}"
     )
+    logging.info("🚀 Starting solve process...")
 
     # Handle both old format (string) and new format (dict) for backward compatibility
     if isinstance(state_data, str):
@@ -58,25 +130,29 @@ async def show_solved(
         logging.info("Task DataFrame JSON received in show_solved: %s", task_df_json)
 
     if not task_df_json:
-        logging.warning("No task_df_json provided to show_solved")
+        logging.warning("❌ No task_df_json provided to show_solved")
         return (
             gr.update(),
             gr.update(),
             None,
             "No schedule to solve. Please load data first using the 'Load Data' button.",
             None,
+            get_streaming_logs(),  # log_terminal
         )
 
     try:
+        logging.info("📋 Parsing task data from JSON...")
         task_df: pd.DataFrame = pd.read_json(StringIO(task_df_json), orient="split")
+        logging.info(f"📊 Found {len(task_df)} tasks to schedule")
     except Exception as e:
-        logging.error(f"Error parsing task_df_json: {e}")
+        logging.error(f"❌ Error parsing task_df_json: {e}")
         return (
             gr.update(),
             gr.update(),
             None,
             f"Error parsing task data: {str(e)}",
             None,
+            get_streaming_logs(),  # log_terminal
         )
 
     # Log sequence numbers from JSON for debugging
@@ -104,11 +180,14 @@ async def show_solved(
             random_seed=parameters.random_seed,
         )
 
+    logging.info("👥 Generating employees and availability...")
     start_date = datetime.now().date()
     randomizer = random.Random(parameters.random_seed)
     employees = generate_employees(parameters, randomizer)
+    logging.info(f"✅ Generated {len(employees)} employees")
 
     # Generate task IDs
+    logging.info("🆔 Generating task IDs and converting to solver format...")
     ids = (str(i) for i in range(len(task_df)))
 
     # Generate tasks from the DataFrame
@@ -125,9 +204,12 @@ async def show_solved(
                 sequence_number=int(row.get("Sequence", 0)),
             )
         )
+    logging.info(f"✅ Converted {len(tasks)} tasks for solver")
 
     # Generate employee availability preferences
+    logging.info("📅 Generating employee availability preferences...")
     generate_employee_availability(employees, parameters, start_date, randomizer)
+    logging.info("✅ Employee availability generated")
     schedule: EmployeeSchedule = EmployeeSchedule(
         employees=employees,
         tasks=tasks,
@@ -137,13 +219,22 @@ async def show_solved(
     )
 
     try:
+        logging.info("🔍 Starting constraint solver...")
         # Wait for the solver
         emp_df, solved_task_df, new_job_id, status = await solve_schedule(
             schedule, debug
         )
+        logging.info("📈 Solver process initiated successfully")
 
         # Return the solved schedule
-        return emp_df, solved_task_df, new_job_id, status, state_data
+        return (
+            emp_df,
+            solved_task_df,
+            new_job_id,
+            status,
+            state_data,
+            get_streaming_logs(),
+        )  # log_terminal
     except Exception as e:
         logging.error(f"Error in solve_schedule: {e}")
         return (
@@ -152,6 +243,7 @@ async def show_solved(
             None,
             f"Error solving schedule: {str(e)}",
             state_data,
+            gr.update(),  # log_terminal
         )
 
 
@@ -228,42 +320,67 @@ async def load_data(
     days_in_schedule: int,
     llm_output,
     debug: bool = False,
-) -> Tuple[pd.DataFrame, pd.DataFrame, gr.update, str, dict]:
+    progress=gr.Progress(),
+):
     """
-    Handle data loading from either file uploads or mock projects
-    Returns (employees_table, schedule_table, job_id_state, status_text, llm_output_state)
+    Handle data loading from either file uploads or mock projects - streaming version
+    Yields intermediate updates for real-time progress
     """
+    # Set up log streaming and clear previous logs
+    setup_log_streaming()
+    clear_streaming_logs()
+
+    # Initial log message
+    logging.info("🚀 Starting data loading process...")
+
+    # Yield initial state
+    yield (
+        gr.update(),  # employees_table
+        gr.update(),  # schedule_table
+        gr.update(),  # job_id_state
+        "Starting data loading...",  # status_text
+        gr.update(),  # llm_output_state
+        get_streaming_logs(),  # log_terminal
+    )
+
     try:
         if project_source == "Upload Project Files":
             # Handle file upload option
+            logging.info("📁 Processing uploaded files...")
             if file_obj is None:
                 logging.error(
-                    "NO FILE OBJECT: User attempted to load data without uploading a file."
+                    "❌ NO FILE OBJECT: User attempted to load data without uploading a file."
                 )
-                return (
+                yield (
                     gr.update(),
                     gr.update(),
                     gr.update(),
                     "No file uploaded. Please upload a file.",
                     gr.update(),
+                    get_streaming_logs(),  # log_terminal
                 )
+                return
 
             # Support multiple files. Gradio returns a list when multiple files are selected.
             files = file_obj if isinstance(file_obj, list) else [file_obj]
             project_source_info = f"{len(files)} file(s)"
+            logging.info(f"📄 Found {len(files)} file(s) to process")
         else:
             # Handle mock project option
+            logging.info("🎭 Processing mock projects...")
             if not mock_projects:
                 logging.error(
-                    "INVALID MOCK PROJECT: User didn't select any mock projects"
+                    "❌ INVALID MOCK PROJECT: User didn't select any mock projects"
                 )
-                return (
+                yield (
                     gr.update(),
                     gr.update(),
                     gr.update(),
                     "Please select at least one mock project.",
                     gr.update(),
+                    get_streaming_logs(),  # log_terminal
                 )
+                return
 
             # Ensure mock_projects is a list
             if isinstance(mock_projects, str):
@@ -273,23 +390,39 @@ async def load_data(
             invalid_projects = [p for p in mock_projects if p not in MOCK_PROJECTS]
             if invalid_projects:
                 logging.error(f"INVALID MOCK PROJECTS: {invalid_projects}")
-                return (
+                yield (
                     gr.update(),
                     gr.update(),
                     gr.update(),
                     f"Invalid mock projects selected: {', '.join(invalid_projects)}",
                     gr.update(),
+                    get_streaming_logs(),  # log_terminal
                 )
+                return
 
             # Create file content list from selected mock projects
             files = [MOCK_PROJECTS[project] for project in mock_projects]
             project_source_info = (
                 f"{len(mock_projects)} mock project(s): {', '.join(mock_projects)}"
             )
+            logging.info(f"📋 Selected mock projects: {', '.join(mock_projects)}")
+
+        # Yield progress update after validation
+        yield (
+            gr.update(),  # employees_table
+            gr.update(),  # schedule_table
+            gr.update(),  # job_id_state
+            f"Processing {len(files)} project(s)...",  # status_text
+            gr.update(),  # llm_output_state
+            get_streaming_logs(),  # log_terminal
+        )
 
         combined_tasks: List[Task] = []
         combined_employees: Dict[str, Employee] = {}
 
+        logging.info(f"🔄 Processing {len(files)} project(s)...")
+
+        # Process each file with real-time progress updates
         for idx, single_file in enumerate(files):
             # Derive a project ID from the filename (fallback to index)
             if project_source == "Upload Project Files":
@@ -301,12 +434,25 @@ async def load_data(
                 # For mock projects, use the mock project name as the project ID
                 project_id = mock_projects[idx]
 
+            logging.info(f"⚙️ Processing project {idx+1}/{len(files)}: '{project_id}'")
+
+            # Yield progress update for each project start
+            yield (
+                gr.update(),  # employees_table
+                gr.update(),  # schedule_table
+                gr.update(),  # job_id_state
+                f"Processing project {idx+1}/{len(files)}: {project_id}",  # status_text
+                gr.update(),  # llm_output_state
+                get_streaming_logs(),  # log_terminal
+            )
+
             schedule_part: EmployeeSchedule = await generate_agent_data(
                 single_file,
                 project_id=project_id,
                 employee_count=employee_count,
                 days_in_schedule=days_in_schedule,
             )
+            logging.info(f"✅ Completed processing project '{project_id}'")
 
             # Merge employees (unique by name)
             for emp in schedule_part.employees:
@@ -316,10 +462,37 @@ async def load_data(
             # Append tasks with project id already set
             combined_tasks.extend(schedule_part.tasks)
 
+            # Yield progress update for each project completion
+            yield (
+                gr.update(),  # employees_table
+                gr.update(),  # schedule_table
+                gr.update(),  # job_id_state
+                f"Completed {idx+1}/{len(files)} projects",  # status_text
+                gr.update(),  # llm_output_state
+                get_streaming_logs(),  # log_terminal
+            )
+
+        logging.info(
+            f"👥 Merging data: {len(combined_employees)} unique employees, {len(combined_tasks)} total tasks"
+        )
+
+        # Yield progress update for final processing
+        yield (
+            gr.update(),  # employees_table
+            gr.update(),  # schedule_table
+            gr.update(),  # job_id_state
+            "Building final schedule...",  # status_text
+            gr.update(),  # llm_output_state
+            get_streaming_logs(),  # log_terminal
+        )
+
         parameters: TimeTableDataParameters = DATA_PARAMS
 
         # Override with custom parameters if provided
         if employee_count is not None or days_in_schedule is not None:
+            logging.info(
+                f"⚙️ Customizing parameters: {employee_count} employees, {days_in_schedule} days"
+            )
             parameters = TimeTableDataParameters(
                 skill_set=parameters.skill_set,
                 days_in_schedule=days_in_schedule
@@ -333,6 +506,7 @@ async def load_data(
                 random_seed=parameters.random_seed,
             )
 
+        logging.info("🏗️ Building final schedule structure...")
         final_schedule: EmployeeSchedule = EmployeeSchedule(
             employees=list(combined_employees.values()),
             tasks=combined_tasks,
@@ -341,6 +515,7 @@ async def load_data(
             ),
         )
 
+        logging.info("📊 Converting to data tables...")
         emp_df: pd.DataFrame = employees_to_dataframe(final_schedule)
         task_df: pd.DataFrame = schedule_to_dataframe(final_schedule)
 
@@ -373,6 +548,7 @@ async def load_data(
         job_id = str(uuid.uuid4())
         app_state.add_solved_schedule(job_id, final_schedule)
 
+        logging.info("💾 Storing schedule state...")
         # Convert to JSON for state and include parameters
         state_data = {
             "task_df_json": task_df.to_json(orient="split"),
@@ -380,22 +556,27 @@ async def load_data(
             "days_in_schedule": days_in_schedule,
         }
 
-        return (
+        logging.info("🎉 Data loading completed successfully!")
+
+        # Final yield with complete results
+        yield (
             emp_df,  # employees_table
             task_df,  # schedule_table
             job_id,  # job_id_state
             f"Data loaded successfully from {project_source_info}",  # status_text
             state_data,  # llm_output_state
+            get_streaming_logs(),  # log_terminal with accumulated logs
         )
 
     except Exception as e:
         logging.error(f"Error loading data: {e}")
-        return (
+        yield (
             gr.update(),
             gr.update(),
             gr.update(),
             f"Error loading data: {str(e)}",
             gr.update(),
+            get_streaming_logs(),  # log_terminal
         )
 
 
@@ -522,7 +703,7 @@ def analyze_constraint_violations(solved_schedule: EmployeeSchedule) -> str:
 
 def poll_solution(
     job_id: str, schedule: EmployeeSchedule, debug: bool = False
-) -> Tuple[pd.DataFrame, pd.DataFrame, str, str, object]:
+) -> Tuple[pd.DataFrame, pd.DataFrame, str, str, object, str]:
     """
     Poll for a solution for a given job_id.
 
@@ -580,14 +761,21 @@ def poll_solution(
                     f"Feasible solution found. Score: {hard_score}/{soft_score}"
                 )
 
-        return emp_df, task_df, job_id, status_message, solved_schedule
+        return (
+            emp_df,
+            task_df,
+            job_id,
+            status_message,
+            solved_schedule,
+            gr.update(),
+        )  # log_terminal
 
-    return None, None, job_id, "Solving...", schedule
+    return None, None, job_id, "Solving...", schedule, gr.update()  # log_terminal
 
 
 async def auto_poll(
     job_id: str, llm_output: dict, debug: bool = False
-) -> Tuple[pd.DataFrame, pd.DataFrame, str, str, dict]:
+) -> Tuple[pd.DataFrame, pd.DataFrame, str, str, dict, str]:
     """Poll for updates"""
     try:
         if job_id and app_state.has_solved_schedule(job_id):
@@ -627,6 +815,7 @@ async def auto_poll(
                 job_id,  # job_id_state
                 status_message,  # status_text
                 llm_output,  # llm_output_state
+                get_streaming_logs(),  # log_terminal
             )
     except Exception as e:
         logging.error(f"Error polling: {e}")
@@ -636,9 +825,17 @@ async def auto_poll(
             job_id,
             f"Error polling: {str(e)}",
             llm_output,
+            get_streaming_logs(),  # log_terminal
         )
 
-    return (gr.update(), gr.update(), None, "No updates", llm_output)
+    return (
+        gr.update(),
+        gr.update(),
+        None,
+        "No updates",
+        llm_output,
+        get_streaming_logs(),  # log_terminal
+    )
 
 
 """

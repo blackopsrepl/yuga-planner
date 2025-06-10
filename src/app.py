@@ -90,20 +90,34 @@ def app(debug: bool = False):
                 multiselect=True,
             )
 
-            # Display for mock project content
-            mock_project_content = gr.Textbox(
-                label="Project Content Preview", interactive=False, lines=8
-            )
+            # Accordion for viewing mock project content
+            with gr.Accordion("📋 Project Content Preview", open=False):
+                mock_project_content_accordion = gr.Textbox(
+                    label="Project Content",
+                    interactive=False,
+                    lines=15,
+                    max_lines=20,
+                    show_copy_button=True,
+                    placeholder="Select projects above and expand this section to view content...",
+                )
 
-            # Link to view content
-            view_content_btn = gr.Button("View Selected Projects Content")
-
-            # Link mock project dropdown to content display
-            view_content_btn.click(
+            # Auto-update content when projects change
+            mock_project_dropdown.change(
                 show_mock_project_content,
                 inputs=[mock_project_dropdown],
-                outputs=[mock_project_content],
+                outputs=[mock_project_content_accordion],
             )
+
+        # Log Terminal - Always visible for streaming logs
+        gr.Markdown("## Live Log Terminal")
+        log_terminal = gr.Textbox(
+            label="Processing Logs",
+            interactive=False,
+            lines=8,
+            max_lines=15,
+            show_copy_button=True,
+            placeholder="Logs will appear here during data loading...",
+        )
 
         # Toggle visibility based on project source selection
         def toggle_visibility(choice):
@@ -146,6 +160,7 @@ def app(debug: bool = False):
             job_id_state,
             status_text,
             llm_output_state,
+            log_terminal,
         ]
 
         # Timer for polling (not related to state)

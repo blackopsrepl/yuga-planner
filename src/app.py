@@ -18,8 +18,7 @@ from handlers import (
     show_mock_project_content,
 )
 
-from state import app_state
-from domain import MOCK_PROJECTS
+from services import MockProjectService
 
 
 # =========================
@@ -83,10 +82,12 @@ def app(debug: bool = False):
 
         # Mock projects dropdown (initially hidden)
         with gr.Group(visible=False) as mock_projects_group:
+            # Get mock project names from ProjectService
+            available_projects = MockProjectService.get_available_project_names()
             mock_project_dropdown = gr.Dropdown(
-                choices=list(MOCK_PROJECTS.keys()),
+                choices=available_projects,
                 label="Select Mock Projects (multiple selection allowed)",
-                value=[list(MOCK_PROJECTS.keys())[0]] if MOCK_PROJECTS else [],
+                value=[available_projects[0]] if available_projects else [],
                 multiselect=True,
             )
 
@@ -145,7 +146,7 @@ def app(debug: bool = False):
 
         with gr.Row():
             load_btn = gr.Button("Load Data")
-            solve_btn = gr.Button("Solve")
+            solve_btn = gr.Button("Solve", interactive=False)  # Initially disabled
 
         gr.Markdown("## Employees")
         employees_table = gr.Dataframe(label="Employees", interactive=False)
@@ -163,13 +164,46 @@ def app(debug: bool = False):
             log_terminal,
         ]
 
+        # Outputs for load_data that also enables solve button
+        load_outputs = outputs + [solve_btn]
+
+        # Create wrapper function to pass debug flag to auto_poll
+        async def auto_poll_with_debug(job_id, llm_output):
+            return await auto_poll(job_id, llm_output, debug=debug)
+
         # Timer for polling (not related to state)
         timer = gr.Timer(2, active=False)
-        timer.tick(auto_poll, inputs=[job_id_state, llm_output_state], outputs=outputs)
+        timer.tick(
+            auto_poll_with_debug,
+            inputs=[job_id_state, llm_output_state],
+            outputs=outputs,
+        )
+
+        # Create wrapper function to pass debug flag to load_data
+        async def load_data_with_debug(
+            project_source,
+            file_obj,
+            mock_projects,
+            employee_count,
+            days_in_schedule,
+            llm_output,
+            progress=gr.Progress(),
+        ):
+            async for result in load_data(
+                project_source,
+                file_obj,
+                mock_projects,
+                employee_count,
+                days_in_schedule,
+                llm_output,
+                debug=debug,
+                progress=progress,
+            ):
+                yield result
 
         # Use state as both input and output
         load_btn.click(
-            load_data,
+            load_data_with_debug,
             inputs=[
                 project_source,
                 file_upload,
@@ -178,12 +212,18 @@ def app(debug: bool = False):
                 days_in_schedule,
                 llm_output_state,
             ],
-            outputs=outputs,
+            outputs=load_outputs,
             api_name="load_data",
         )
 
+        # Create wrapper function to pass debug flag to show_solved
+        async def show_solved_with_debug(state_data, job_id):
+            return await show_solved(state_data, job_id, debug=debug)
+
         solve_btn.click(
-            show_solved, inputs=[llm_output_state, job_id_state], outputs=outputs
+            show_solved_with_debug,
+            inputs=[llm_output_state, job_id_state],
+            outputs=outputs,
         ).then(start_timer, inputs=[job_id_state, llm_output_state], outputs=timer)
 
         if debug:

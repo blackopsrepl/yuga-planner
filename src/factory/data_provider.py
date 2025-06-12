@@ -125,7 +125,11 @@ async def generate_agent_data(
     total_slots: int = parameters.days_in_schedule * SLOTS_PER_DAY
 
     # Read file
-    logging.info("FILE OBJECT: %s %s", file, type(file))
+    # Debug info - only log in debug mode
+    import os
+
+    if os.getenv("YUGA_DEBUG", "false").lower() == "true":
+        logging.info("FILE OBJECT: %s %s", file, type(file))
     match file:
         case file if hasattr(file, "read"):
             input_str = file.read()

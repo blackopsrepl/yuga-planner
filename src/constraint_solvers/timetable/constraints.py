@@ -41,6 +41,40 @@ def get_slot_date(slot: int) -> date:
     return date.today() + timedelta(days=slot // 20)  # 20 slots per day
 
 
+def tasks_violate_sequence_order(task1: Task, task2: Task) -> bool:
+    """Check if two tasks violate the project sequence order.
+
+    Args:
+        task1 (Task): The first task.
+        task2 (Task): The second task.
+
+    Returns:
+        bool: True if task1 should come before task2 but overlaps with it.
+    """
+    # Different tasks only
+    if task1.id == task2.id:
+        return False
+
+    # Both tasks must have project_id attribute
+    if not (hasattr(task1, "project_id") and hasattr(task2, "project_id")):
+        return False
+
+    # Task1 must belong to a project
+    if task1.project_id == "":
+        return False
+
+    # Tasks must be in the same project
+    if task1.project_id != task2.project_id:
+        return False
+
+    # Task1 must have lower sequence number (should come first)
+    if task1.sequence_number >= task2.sequence_number:
+        return False
+
+    # Task1 overlaps with task2 (task1 should finish before task2 starts)
+    return task1.start_slot + task1.duration_slots > task2.start_slot
+
+
 @constraint_provider
 def define_constraints(constraint_factory: ConstraintFactory) -> list:
     """
@@ -155,30 +189,15 @@ def desired_day_for_employee(constraint_factory: ConstraintFactory):
 
 def maintain_project_task_order(constraint_factory: ConstraintFactory):
     """Ensure tasks within the same project maintain their original order."""
-    # For each task, ensure it finishes before any task with higher sequence in the same project
     return (
         constraint_factory.for_each(Task)
         .join(Task)
-        .filter(
-            lambda task1, task2:
-            # Same project, different tasks
-            task1.id != task2.id
-            and hasattr(task1, "project_id")
-            and hasattr(task2, "project_id")
-            and task1.project_id != ""
-            and task1.project_id == task2.project_id
-            and
-            # task1 has lower sequence number than task2
-            task1.sequence_number < task2.sequence_number
-            and
-            # but task1 doesn't finish before task2 starts (violation!)
-            task1.start_slot + task1.duration_slots > task2.start_slot
-        )
+        .filter(tasks_violate_sequence_order)
         .penalize(
             HardSoftDecimalScore.ONE_SOFT,
-            lambda task1, task2: 10
+            lambda task1, task2: 100
             * (task1.start_slot + task1.duration_slots - task2.start_slot),
-        )  # Moderate penalty (10x) proportional to overlap
+        )  # High penalty (100x) proportional to overlap to strongly encourage proper sequencing
         .as_constraint("Project task sequence order")
     )
 

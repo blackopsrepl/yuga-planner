@@ -1,6 +1,9 @@
 import os
 from dataclasses import dataclass
 
+# =========================
+#        MOCK PROJECTS
+# =========================
 
 MOCK_PROJECTS: dict[str, str] = {
     "go-rssagg": """# GO-RSSAGG
@@ -63,7 +66,9 @@ Machine learning service for time-series forecasting of inventory demands, with 
 """,
 }
 
-
+# =========================
+#        AGENTS CONFIG
+# =========================
 @dataclass
 class AgentsConfig:
     """Global configuration for all agents"""

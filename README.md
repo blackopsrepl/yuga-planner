@@ -13,7 +13,7 @@ tags: ["agent-demo-track"]
 
 **This project was developed for the [Hugging Face Agents MCP Hackathon](https://huggingface.co/Agents-MCP-Hackathon)!**
 
-Yuga Planner is a neuro-symbolic system prototype: it provides an agent-powered team scheduling and task allocation platform build on [Gradio](https://gradio.app/).
+Yuga Planner is a neuro-symbolic system prototype: it provides an agent-powered team scheduling and task allocation platform built on [Gradio](https://gradio.app/).
 
 It takes a project description file such as a README.md file, breaks it down into actionable tasks through a [LLamaIndex](https://www.llamaindex.ai/) agent, then uses [Timefold](http://www.timefold.ai) to generate optimal employee schedules for complex projects.
 

@@ -31,7 +31,7 @@ def app(debug: bool = False):
         gr.Markdown(
             """
             # Yuga Planner
-            Yuga Planner is a neuro-symbolic system prototype: it provides an agent-powered team scheduling and task allocation platform build on [Gradio](https://gradio.app/).
+            Yuga Planner is a neuro-symbolic system prototype: it provides an agent-powered team scheduling and task allocation platform built on [Gradio](https://gradio.app/).
             """
         )
         gr.Markdown("### SWE Team Task Scheduling Demo")

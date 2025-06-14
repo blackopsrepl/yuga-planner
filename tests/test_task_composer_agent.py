@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_secrets("tests/secrets/creds.py")
 # Import task_composer_agent after environment variables are set
-from src.agents.task_composer_agent import task_composer_agent
+from src.agents.task_composer_agent import TaskComposerAgent
 
 
 @pytest.mark.asyncio
@@ -21,7 +21,7 @@ async def test_task_composer_agent():
 
     # Create agent
     logger.info("\nInitializing task_composer_agent...")
-    agent = task_composer_agent()
+    agent = TaskComposerAgent()
 
     # Test input
     test_input = "Plan a weekend trip to Paris"

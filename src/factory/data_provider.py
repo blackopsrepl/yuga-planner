@@ -6,7 +6,7 @@ from itertools import product
 from random import Random
 from dataclasses import dataclass, field
 
-from agents.task_composer_agent import task_composer_agent
+from agents.task_composer_agent import TaskComposerAgent
 from domain import AgentsConfig, AGENTS_CONFIG
 
 from constraint_solvers.timetable.domain import *
@@ -144,7 +144,7 @@ async def generate_agent_data(
             raise ValueError(f"Unsupported file type: {type(file)}")
 
     # Run agent with skills and context
-    agent = task_composer_agent(AGENTS_CONFIG)  # Use global config
+    agent = TaskComposerAgent(AGENTS_CONFIG)  # Use global config
 
     # Get available skills from parameters
     available_skills = list(parameters.skill_set.required_skills) + list(

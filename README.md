@@ -41,7 +41,7 @@ It takes a project description file such as a README.md file, breaks it down int
 ## Architecture
 
 - **Gradio UI:** Main entry point for users
-- **TaskComposerAgent:** Uses LLMs to decompose and estimate tasks from Markdown
+- **task_composer_agent:** Uses LLMs to decompose and estimate tasks from Markdown
 - **Data Provider:** Generates synthetic employee data and availability preferences
 - **Constraint Solver:** Assigns tasks to employees, optimizing for skills, availability, and fairness
 - **Utils:** Markdown analysis, secret loading, and more

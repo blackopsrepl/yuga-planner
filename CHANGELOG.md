@@ -77,7 +77,7 @@ All notable changes to this project will be documented in this file. See [commit
 * add Markdown analyzer utility a364fcc
 * add task composer agent 2153f15
 * **deploy:** setup initial Docker environment c6e1cef
-* integrated timetable solver with TaskComposerAgent 391ae1e
+* integrated timetable solver with task_composer_agent 391ae1e
 * refactor app for improved data generation and polling b836318
 
 

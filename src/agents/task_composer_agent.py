@@ -27,7 +27,7 @@ logger: logging.Logger = logging.getLogger(__name__)
 from domain import AgentsConfig, AGENTS_CONFIG
 
 
-class TaskComposerAgent:
+class task_composer_agent:
     def __init__(self, config: AgentsConfig = AGENTS_CONFIG):
         self.config = config
         self.llm: Optional[NebiusLLM] = None

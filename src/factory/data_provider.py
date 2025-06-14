@@ -6,7 +6,7 @@ from itertools import product
 from random import Random
 from dataclasses import dataclass, field
 
-from agents.TaskComposerAgent import TaskComposerAgent
+from agents.task_composer_agent import task_composer_agent
 from domain import AgentsConfig, AGENTS_CONFIG
 
 from constraint_solvers.timetable.domain import *
@@ -100,7 +100,7 @@ async def generate_agent_data(
     file, project_id: str = "", employee_count: int = None, days_in_schedule: int = None
 ) -> EmployeeSchedule:
     """
-    Generates an EmployeeSchedule using tasks from TaskComposerAgent output.
+    Generates an EmployeeSchedule using tasks from task_composer_agent output.
     """
     parameters: TimeTableDataParameters = DATA_PARAMS
 
@@ -144,7 +144,7 @@ async def generate_agent_data(
             raise ValueError(f"Unsupported file type: {type(file)}")
 
     # Run agent with skills and context
-    agent = TaskComposerAgent(AGENTS_CONFIG)  # Use global config
+    agent = task_composer_agent(AGENTS_CONFIG)  # Use global config
 
     # Get available skills from parameters
     available_skills = list(parameters.skill_set.required_skills) + list(
@@ -336,7 +336,7 @@ def earliest_monday_on_or_after(target_date: date) -> date:
 
 def tasks_from_agent_output(agent_output, parameters, project_id: str = ""):
     """
-    Convert TaskComposerAgent output (list of (description, duration, skill)) to Task objects.
+    Convert task_composer_agent output (list of (description, duration, skill)) to Task objects.
     """
     from constraint_solvers.timetable.domain import Task
 

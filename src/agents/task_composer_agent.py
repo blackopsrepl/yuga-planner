@@ -170,12 +170,16 @@ class TaskComposerWorkflow(Workflow):
                 )
                 merged_tasks.append((task, response.text))
                 logger.info(f"Completed time estimation {i}/{len(tasks)}")
+
             except asyncio.TimeoutError:
                 logger.warning(f"Time estimation timeout for task {i}: {task[:50]}...")
+
                 # Use default duration of 2 units (1 hour)
                 merged_tasks.append((task, "2"))
+
             except Exception as e:
                 logger.error(f"Error estimating time for task {i}: {e}")
+
                 # Use default duration of 2 units (1 hour)
                 merged_tasks.append((task, "2"))
 
@@ -234,13 +238,17 @@ class TaskComposerWorkflow(Workflow):
                 logger.info(
                     f"Completed skill matching {i}/{len(event.task_evaluator_output)}: {task[:50]}... -> {matched_skill}"
                 )
+
             except asyncio.TimeoutError:
                 logger.warning(f"Skill matching timeout for task {i}: {task[:50]}...")
+
                 # Use first available skill as fallback
                 fallback_skill = skills[0] if skills else ""
                 task_dependencies.append((task, duration, fallback_skill))
+
             except Exception as e:
                 logger.error(f"Error matching skill for task {i}: {e}")
+
                 # Use first available skill as fallback
                 fallback_skill = skills[0] if skills else ""
                 task_dependencies.append((task, duration, fallback_skill))

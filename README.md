@@ -60,6 +60,22 @@ It takes a project description file such as a README.md file, breaks it down int
 | **Live Log Streaming** | Real-time solver progress and status updates in UI | ✅ |
 | **Configurable Parameters** | Adjustable employee count and schedule duration | ✅ |
 | **Mock Project Loading** | Pre-configured sample projects for quick testing | ✅ |
+| **Calendar Parsing** | Extracts tasks from uploaded calendar files (.ics) | ✅ |
+| **MCP Endpoint** | API endpoint for MCP tool integration | ✅ |
+
+## 🧩 MCP Tool Integration
+
+Yuga Planner now includes an **MCP tool** endpoint, allowing integration with the Hugging Face MCP platform. The MCP tool can process uploaded calendar files (such as `.ics`) and user messages, extracting events and generating a corresponding task dataframe.
+
+> **Note:** The current MCP tool implementation returns the *unsolved* task dataframe (not a scheduled/solved output), as full schedule solving is not yet supported for MCP requests. This allows downstream tools or users to inspect and process the extracted tasks before scheduling is implemented.
+
+**Features:**
+- Accepts calendar files and user instructions
+- Parses events into actionable tasks
+- Returns a structured dataframe of tasks (unsolved)
+- Designed for easy integration with agent workflows
+
+See the [CHANGELOG.md](CHANGELOG.md) for details on recent MCP-related changes.
 
 ### Work in Progress
 

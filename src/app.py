@@ -1,6 +1,8 @@
 import os, argparse, logging
 import gradio as gr
 
+from icalendar import Calendar
+
 logging.basicConfig(level=logging.INFO)
 
 
@@ -19,6 +21,59 @@ from handlers import (
 )
 
 from services import MockProjectService
+
+# Store last chat message and file in global variables (for demo purposes)
+last_message_body = None
+last_attached_file = None
+
+
+def extract_ical_entries(file_bytes):
+    try:
+        cal = Calendar.from_ical(file_bytes)
+        entries = []
+        for component in cal.walk():
+            if component.name == "VEVENT":
+                summary = str(component.get("summary", ""))
+                dtstart = str(component.get("dtstart", ""))
+                dtend = str(component.get("dtend", ""))
+                entries.append({"summary": summary, "dtstart": dtstart, "dtend": dtend})
+        return entries, None
+    except Exception as e:
+        return None, str(e)
+
+
+@mcp.tool
+async def process_message_and_attached_file(file_path: str, message_body: str) -> dict:
+    """
+    Store the last chat message and attached file, echo the message, and extract calendar entries if possible.
+    Args:
+        file_path (str): Path to the attached file
+        message_body (str): The body of the last chat message
+    Returns:
+        dict: Contains confirmation, file info, and calendar entries or error
+    """
+    global last_message_body, last_attached_file
+    last_message_body = message_body
+    last_attached_file = file_path
+    # Read file bytes
+    try:
+        with open(file_path, "rb") as f:
+            file_bytes = f.read()
+    except Exception as e:
+        return {"error": f"Failed to read file: {e}"}
+    # Try to extract calendar entries
+    entries, error = extract_ical_entries(file_bytes)
+    if error:
+        return {
+            "confirmation": f"Received your message: {message_body}",
+            "file": os.path.basename(file_path),
+            "error": f"File is not a valid calendar file: {error}",
+        }
+    return {
+        "confirmation": f"Received your message: {message_body}",
+        "file": os.path.basename(file_path),
+        "calendar_entries": entries,
+    }
 
 
 # =========================
@@ -251,6 +306,9 @@ def app(debug: bool = False):
                 outputs=[debug_out, gr.State()],
             )
 
+        # Register the MCP tool as an API endpoint
+        gr.api(process_message_and_attached_file)
+
     return demo
 
 
@@ -278,5 +336,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     app(debug=args.debug).launch(
-        server_name=args.server_name, server_port=args.server_port
+        server_name=args.server_name, server_port=args.server_port, mcp_server=True
     )

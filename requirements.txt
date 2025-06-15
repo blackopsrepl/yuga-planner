@@ -2,7 +2,9 @@
 pytest
 pytest-asyncio
 python-dotenv
+pathlib
 gradio
+gradio[mcp]
 llama-index-core
 llama-index-utils-workflow
 llama-index-llms-nebius

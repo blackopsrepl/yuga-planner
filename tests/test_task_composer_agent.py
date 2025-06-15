@@ -35,20 +35,20 @@ async def test_task_composer_agent():
     # Print the result
     logger.info(f"\n=== Final Result ===")
     logger.info("Task breakdown with estimated times:")
-    for task, duration in result:
-        logger.info(f"- {task}: {duration} units")
+    for task, duration, skill in result:
+        logger.info(f"- {task}: {duration} units (Skill: {skill})")
 
     # Calculate total time
-    total_time = sum(int(time) for _, time in result)
+    total_time = sum(int(time) for _, time, _ in result)
     logger.info(
         f"\nTotal estimated time: {total_time} units ({total_time * 30} minutes)"
     )
 
-    # Verify the result is a list of tuples
+    # Verify the result is a list of 3-tuples
     assert isinstance(result, list), f"Expected a list, got {type(result)}"
     assert all(
-        isinstance(item, tuple) and len(item) == 2 for item in result
-    ), "Expected a list of (task, duration) tuples"
+        isinstance(item, tuple) and len(item) == 3 for item in result
+    ), "Expected a list of (task, duration, skill) tuples"
     logger.info("\n=== Test Summary ===")
     logger.info("✓ Test passed!")
     logger.info(f"✓ Task: {test_input}")

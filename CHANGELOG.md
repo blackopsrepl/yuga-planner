@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.4.0](///compare/v1.3.1...v1.4.0) (2025-06-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* add MCP data handling and task generation
+* add basic MCP endpoint
+
+### Features
+
+* add basic MCP endpoint de6f753
+* add calendar parsing functionality 2bfea17
+* add MCP data handling and task generation 1463a87
+
+
+### Bug Fixes
+
+* fix test_task_composer_agent.py cc28422
+
 ## [1.3.1](///compare/v1.3.0...v1.3.1) (2025-06-14)
 
 ## [1.3.0](///compare/v1.2.2...v1.3.0) (2025-06-12)

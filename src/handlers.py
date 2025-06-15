@@ -183,6 +183,7 @@ def poll_solution(
             schedule,
             gr.update(),  # log_terminal
         )
+
     except Exception as e:
         logging.error(f"Error in poll_solution: {e}")
         return (
@@ -216,6 +217,7 @@ async def auto_poll(
             llm_output,  # llm_output_state
             logging_service.get_streaming_logs(),  # log_terminal
         )
+
     except Exception as e:
         logging.error(f"Error in auto_poll: {e}")
         return (

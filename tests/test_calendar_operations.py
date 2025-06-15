@@ -10,5 +10,14 @@ def test_calendar_operations():
 
     for event in calendar.events:
         print(event.get("summary"))
-        print(event.get("dtstart"))
-        print(event.get("dtend"))
+
+        def to_iso(val):
+            if hasattr(val, "dt"):
+                dt = val.dt
+                if hasattr(dt, "isoformat"):
+                    return dt.isoformat()
+                return str(dt)
+            return str(val)
+
+        print(to_iso(event.get("dtstart")))
+        print(to_iso(event.get("dtend")))

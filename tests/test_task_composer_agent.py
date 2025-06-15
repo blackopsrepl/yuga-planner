@@ -39,7 +39,10 @@ async def test_task_composer_agent():
         logger.info(f"- {task}: {duration} units (Skill: {skill})")
 
     # Calculate total time
-    total_time = sum(int(time) for _, time, _ in result)
+    total_time = sum(
+        int(time) if str(time).isdigit() and str(time) != "" else 0
+        for _, time, _ in result
+    )
     logger.info(
         f"\nTotal estimated time: {total_time} units ({total_time * 30} minutes)"
     )

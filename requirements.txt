@@ -1,0 +1,14 @@
+# Base requirements
+pytest
+pytest-asyncio
+python-dotenv
+pathlib
+gradio
+gradio[mcp]
+llama-index-core
+llama-index-utils-workflow
+llama-index-llms-nebius
+pandas
+pydantic
+timefold == 1.22.1b0
+icalendar

@@ -21,7 +21,7 @@ It takes a project description file such as a README.md file, breaks it down int
 
 ## 🚀 Try It Now
 **Live Demo:**
-[https://huggingface.co/spaces/Agents-MCP-Hackathon/yuga-planner](https://huggingface.co/spaces/Agents-MCP-Hackathon/yuga-planner)
+[https://huggingface.co/spaces/blackopsrepl/yuga-planner](https://huggingface.co/spaces/blackopsrepl/yuga-planner)
 
 **Source Code on GitHub:**
 [https://github.com/blackopsrepl/yuga-planner](https://github.com/blackopsrepl/yuga-planner)
@@ -79,8 +79,11 @@ See the [CHANGELOG.md](CHANGELOG.md) for details on recent MCP-related changes.
 
 ### Work in Progress
 
+- **MCP**
 - **Gradio UI overhaul**
-- **General optimization of the workflow**
+- **Migration to Pydantic models**
+- **Migrate from violation_analyzer to Timefold dedicated libraries**
+- **Include tests for all constraints using ConstraintVerifier**
 
 ### Future Work
 

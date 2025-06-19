@@ -13,7 +13,7 @@ if not os.getenv("NEBIUS_API_KEY") or not os.getenv("NEBIUS_MODEL"):
     load_secrets("tests/secrets/creds.py")
 
 
-from handlers import (
+from handlers.web_backend import (
     load_data,
     show_solved,
     start_timer,
@@ -21,7 +21,7 @@ from handlers import (
     show_mock_project_content,
 )
 
-from mcp_handlers import process_message_and_attached_file
+from handlers.mcp_backend import process_message_and_attached_file
 
 from services import MockProjectService
 

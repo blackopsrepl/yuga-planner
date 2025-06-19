@@ -5,7 +5,7 @@ from typing import Dict, List, Tuple, Union, Optional, Any
 
 import pandas as pd
 
-from factory.data_provider import (
+from factory.data.provider import (
     generate_agent_data,
     DATA_PARAMS,
     TimeTableDataParameters,
@@ -19,8 +19,8 @@ from constraint_solvers.timetable.domain import (
     Employee,
 )
 
-from helpers import schedule_to_dataframe, employees_to_dataframe
-from .mock_projects_service import MockProjectService
+from factory.data.formatters import schedule_to_dataframe, employees_to_dataframe
+from .mock_projects import MockProjectService
 from utils.logging_config import setup_logging, get_logger
 
 # Initialize logging

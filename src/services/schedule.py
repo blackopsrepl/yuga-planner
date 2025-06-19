@@ -5,21 +5,27 @@ from typing import Tuple, Dict, Any, Optional
 import pandas as pd
 import gradio as gr
 
-from .state_service import StateService
+from .state import StateService
 from constraint_solvers.timetable.solver import solver_manager
-from factory.data_provider import (
-    generate_employees,
-    generate_employee_availability,
+
+from factory.data.provider import (
     DATA_PARAMS,
     TimeTableDataParameters,
     SLOTS_PER_DAY,
 )
 
+from factory.data.generators import (
+    generate_employees,
+    generate_employee_availability,
+)
+
+from factory.data.formatters import schedule_to_dataframe, employees_to_dataframe
+
 from constraint_solvers.timetable.domain import EmployeeSchedule, ScheduleInfo
 
-from helpers import schedule_to_dataframe, employees_to_dataframe
-from .data_service import DataService
-from constraint_solvers.timetable.analysis import ConstraintViolationAnalyzer
+from .data import DataService
+from .constraint_analyzer import ConstraintAnalyzerService
+
 from utils.logging_config import setup_logging, get_logger
 
 # Initialize logging
@@ -333,16 +339,22 @@ class ScheduleService:
             if hard_score < 0:
                 # Hard constraints are violated - the problem is infeasible
                 violation_count = abs(int(hard_score))
+
                 violation_details = (
-                    ConstraintViolationAnalyzer.analyze_constraint_violations(schedule)
+                    ConstraintAnalyzerService.analyze_constraint_violations(schedule)
                 )
-                suggestions = ConstraintViolationAnalyzer.generate_suggestions(schedule)
+
+                suggestions = (
+                    ConstraintAnalyzerService.generate_improvement_suggestions(schedule)
+                )
+
                 suggestion_text = "\n".join(f"• {s}" for s in suggestions)
 
                 status_message = (
                     f"⚠️ CONSTRAINTS VIOLATED: {violation_count} hard constraint(s) could not be satisfied. "
                     f"The schedule is not feasible.\n\n{violation_details}\n\nSuggestions:\n{suggestion_text}"
                 )
+
                 logger.warning(
                     f"Infeasible solution detected. Hard score: {hard_score}"
                 )

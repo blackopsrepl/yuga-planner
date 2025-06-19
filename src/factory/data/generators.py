@@ -1,8 +1,9 @@
 from datetime import date, timedelta
+import random
 from random import Random
 from itertools import product
 
-from factory.data_models import *
+from factory.data.models import *
 from constraint_solvers.timetable.domain import *
 
 
@@ -200,6 +201,7 @@ def generate_tasks(
                 required_skill=required_skill,
             )
         )
+
     return tasks
 
 
@@ -209,51 +211,35 @@ def generate_tasks_from_calendar(
     calendar_entries: list[dict],
 ) -> list[Task]:
     """
-    Given a list of calendar entry dicts, generate Task objects with randomized required_skill.
-    Output format matches generate_tasks.
+    Generate Task objects from calendar entries with Skills.
     """
-    from datetime import datetime
-
     tasks: list[Task] = []
     ids = generate_task_ids()
 
     for entry in calendar_entries:
-        try:
-            summary = entry.get("summary", "Event")
-            dtstart = entry.get("dtstart", "").replace("Z", "+00:00")
-            dtend = entry.get("dtend", "").replace("Z", "+00:00")
-            start_dt = datetime.fromisoformat(dtstart) if dtstart else None
-            end_dt = datetime.fromisoformat(dtend) if dtend else None
-            if start_dt and end_dt:
-                duration_minutes = int((end_dt - start_dt).total_seconds() // 60)
-                duration_slots = max(1, duration_minutes // 30)
-            else:
-                duration_slots = 2  # Default 1 hour
-
-            # Randomize required_skill as in generate_tasks
+        # Get skill from entry or randomly assign
+        required_skill = entry.get("skill")
+        if not required_skill:
             if random.random() >= 0.5:
                 required_skill = random.choice(parameters.skill_set.required_skills)
-
             else:
                 required_skill = random.choice(parameters.skill_set.optional_skills)
 
-            tasks.append(
-                Task(
-                    id=next(ids),
-                    description=summary,
-                    duration_slots=duration_slots,
-                    start_slot=0,  # This will be assigned by the solver
-                    required_skill=required_skill,
-                )
+        tasks.append(
+            Task(
+                id=next(ids),
+                description=entry["summary"],
+                duration_slots=entry.get("duration_slots", 2),  # Default 1 hour
+                start_slot=entry.get("start_slot", 0),
+                required_skill=required_skill,
             )
-
-        except Exception:
-            continue
+        )
 
     return tasks
 
 
 def generate_task_ids():
+    """Generate sequential task IDs starting from 0."""
     current_id = 0
     while True:
         yield str(current_id)
@@ -279,18 +265,16 @@ def weights(distributions: tuple[CountDistribution, ...]) -> tuple[float, ...]:
 
 def earliest_monday_on_or_after(target_date: date) -> date:
     """
-    Returns the date of the next Monday on or after the given date.
-    If the date is already Monday, returns the same date.
+    Returns the earliest Monday on or after the given date.
     """
-    days = (7 - target_date.weekday()) % 7
-    return target_date + timedelta(days=days)
+    days_until_monday = (7 - target_date.weekday()) % 7
+    return target_date + timedelta(days=days_until_monday)
 
 
 def tasks_from_agent_output(agent_output, parameters, project_id: str = ""):
     """
     Convert task_composer_agent output (list of (description, duration, skill)) to Task objects.
     """
-    from constraint_solvers.timetable.domain import Task
 
     ids = generate_task_ids()
     tasks = []
@@ -302,12 +286,13 @@ def tasks_from_agent_output(agent_output, parameters, project_id: str = ""):
         elif len(task_data) == 2:
             description, duration = task_data
             # Fallback to random assignment if no skill provided
-            import random
+            # Use a new Random instance for compatibility
+            rng = random.Random()
 
-            if random.random() >= 0.5:
-                required_skill = random.choice(parameters.skill_set.required_skills)
+            if rng.random() >= 0.5:
+                required_skill = rng.choice(parameters.skill_set.required_skills)
             else:
-                required_skill = random.choice(parameters.skill_set.optional_skills)
+                required_skill = rng.choice(parameters.skill_set.optional_skills)
         else:
             continue  # skip invalid task data
 
@@ -325,19 +310,20 @@ def tasks_from_agent_output(agent_output, parameters, project_id: str = ""):
             )
             if required_skill not in all_skills:
                 # If skill doesn't match exactly, try to find closest match or fallback to random
-                import random
+                rng = random.Random()
 
-                required_skill = random.choice(parameters.skill_set.required_skills)
+                required_skill = rng.choice(parameters.skill_set.required_skills)
 
         tasks.append(
             Task(
                 id=next(ids),
                 description=description,
                 duration_slots=duration_int,
-                start_slot=0,
+                start_slot=0,  # Will be assigned by solver
                 required_skill=required_skill,
                 project_id=project_id,
                 sequence_number=sequence_num,
             )
         )
+
     return tasks

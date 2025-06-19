@@ -1,4 +1,4 @@
-import os, asyncio
+import asyncio
 from typing import Optional, List
 
 from llama_index.llms.nebius import NebiusLLM
@@ -12,7 +12,7 @@ from llama_index.core.workflow import (
 )
 
 from utils.markdown_analyzer import MarkdownAnalyzer
-from agents.task_processing import (
+from factory.agents.task_processing import (
     remove_markdown_code_blocks,
     remove_markdown_list_elements,
     unwrap_tasks_from_generated,
@@ -88,6 +88,34 @@ class TaskComposerAgent:
         return await self.workflow.run(
             input=query, skills=skills or [], context=context
         )
+
+    async def compose_tasks(self, input_text: str, parameters) -> List:
+        """
+        Compose tasks from input text using the task composer workflow.
+
+        Args:
+            input_text: The input text to compose tasks from
+            parameters: TimeTableDataParameters containing skill information
+
+        Returns:
+            List of task tuples (description, duration, skill)
+        """
+        try:
+            # Extract skills from parameters
+            skills = list(parameters.skill_set.required_skills) + list(
+                parameters.skill_set.optional_skills
+            )
+
+            # Run the workflow
+            result = await self.run_workflow(input_text, skills=skills, context="")
+
+            # The workflow returns a list of tuples (description, duration, skill)
+            logger.debug(f"Task composer workflow result: {result}")
+            return result
+
+        except Exception as e:
+            logger.error(f"Error in compose_tasks: {e}")
+            return []
 
 
 class TaskSplitter(Event):
@@ -200,34 +228,14 @@ class TaskComposerWorkflow(Workflow):
     async def evaluate_tasks_dependencies(
         self, event: TaskEvaluator
     ) -> TaskDependencyMatcher:
-        logger.info("=== Step 3: Task Dependencies ===")
-        logger.info("Matching tasks with available skills")
+        logger.info("=== Step 3: Skill Matching ===")
+        logger.info("Matching tasks with skills...")
 
-        # Get skills and context from the event
-        skills = event.skills
-        context = event.context
-
-        if not skills:
-            logger.warning("No skills provided, skipping dependency matching")
-            # Convert to dependency format with empty skill
-            task_dependencies = [
-                (task, duration, "") for task, duration in event.task_evaluator_output
-            ]
-            return TaskDependencyMatcher(task_dependency_output=task_dependencies)
-
-        skills_str = "\n".join([f"- {skill}" for skill in skills])
-        logger.info(f"Available skills: {skills}")
-        logger.info(f"Context: {context}")
-
-        task_dependencies: list[tuple[str, str, str]] = []
-        logger.info(
-            f"Processing {len(event.task_evaluator_output)} tasks for skill matching..."
-        )
-
+        final_tasks: list[tuple[str, str, str]] = []
         for i, (task, duration) in enumerate(event.task_evaluator_output, 1):
             try:
                 formatted_prompt: str = self._task_deps_matcher_template.format(
-                    task=task, skills=skills_str, context=context
+                    task=task, skills=", ".join(event.skills), context=event.context
                 )
 
                 response = await asyncio.wait_for(
@@ -236,36 +244,35 @@ class TaskComposerWorkflow(Workflow):
                 )
 
                 matched_skill = response.text.strip()
-                task_dependencies.append((task, duration, matched_skill))
+                final_tasks.append((task, duration, matched_skill))
                 logger.info(
-                    f"Completed skill matching {i}/{len(event.task_evaluator_output)}: {task[:50]}... -> {matched_skill}"
+                    f"Completed skill matching {i}/{len(event.task_evaluator_output)}"
                 )
 
             except asyncio.TimeoutError:
                 logger.warning(f"Skill matching timeout for task {i}: {task[:50]}...")
 
-                # Use first available skill as fallback
-                fallback_skill = skills[0] if skills else ""
-                task_dependencies.append((task, duration, fallback_skill))
+                # Use a default skill
+                default_skill = event.skills[0] if event.skills else "General"
+                final_tasks.append((task, duration, default_skill))
 
             except Exception as e:
                 logger.error(f"Error matching skill for task {i}: {e}")
 
-                # Use first available skill as fallback
-                fallback_skill = skills[0] if skills else ""
-                task_dependencies.append((task, duration, fallback_skill))
+                # Use a default skill
+                default_skill = event.skills[0] if event.skills else "General"
+                final_tasks.append((task, duration, default_skill))
 
-        return TaskDependencyMatcher(task_dependency_output=task_dependencies)
+        logger.info(f"Skill matching completed for {len(final_tasks)} tasks")
+
+        return TaskDependencyMatcher(task_dependency_output=final_tasks)
 
     @step
     async def result_output(self, event: TaskDependencyMatcher) -> StopEvent:
-        logger.info("=== Step 4: Final Result ===")
+        logger.info("=== Final Result ===")
+        logger.info(f"Generated {len(event.task_dependency_output)} tasks with skills")
 
-        # Log the final breakdown with dependencies
         for task, duration, skill in event.task_dependency_output:
-            logger.info(f"Task: {task}")
-            logger.info(f"  Duration: {duration} units")
-            logger.info(f"  Matched Skill: {skill}")
-            logger.info("-" * 50)
+            logger.info(f"- {task[:50]}... | Duration: {duration} | Skill: {skill}")
 
         return StopEvent(result=event.task_dependency_output)

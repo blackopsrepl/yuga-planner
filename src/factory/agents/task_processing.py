@@ -1,5 +1,3 @@
-import re
-
 from utils.markdown_analyzer import MarkdownAnalyzer
 from utils.logging_config import setup_logging, get_logger
 

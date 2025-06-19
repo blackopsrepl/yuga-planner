@@ -7,7 +7,7 @@ from icalendar import Calendar, vDDDTypes
 # Load environment variables for agent (if needed)
 load_secrets("tests/secrets/creds.py")
 
-import factory.data_provider as data_provider
+import factory.data.provider as data_provider
 from src.utils.extract_calendar import extract_ical_entries
 
 

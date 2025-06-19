@@ -1,7 +1,7 @@
-import logging
-import threading
 from datetime import datetime
 from typing import List
+
+import logging, threading
 
 from utils.logging_config import setup_logging, get_logger, is_debug_enabled
 

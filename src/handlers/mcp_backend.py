@@ -32,9 +32,9 @@ import time
 
 from utils.extract_calendar import extract_ical_entries
 
-from factory.data_provider import generate_mcp_data
+from factory.data.provider import generate_mcp_data
 from services import ScheduleService, StateService
-from helpers import schedule_to_dataframe
+from factory.data.formatters import schedule_to_dataframe
 
 from utils.logging_config import setup_logging, get_logger, is_debug_enabled
 
@@ -143,7 +143,7 @@ async def process_message_and_attached_file(file_path: str, message_body: str) -
                 solved_schedule = StateService.get_solved_schedule(job_id)
 
                 # Check if we have a valid solution
-                if solved_schedule and solved_schedule.score is not None:
+                if solved_schedule is not None:
                     processing_time = time.time() - start_time
                     logger.info(
                         "Schedule solved after %d polls! (Total time: %.2fs)",
@@ -151,35 +151,58 @@ async def process_message_and_attached_file(file_path: str, message_body: str) -
                         processing_time,
                     )
 
-                    # Convert to final dataframe
-                    final_df = schedule_to_dataframe(solved_schedule)
+                    try:
+                        # Convert to final dataframe
+                        final_df = schedule_to_dataframe(solved_schedule)
 
-                    # Generate status message
-                    status_message = ScheduleService.generate_status_message(
-                        solved_schedule
-                    )
+                        # Generate status message
+                        status_message = ScheduleService.generate_status_message(
+                            solved_schedule
+                        )
 
-                    logger.info("Final Status: %s", status_message)
+                        logger.info("Final Status: %s", status_message)
 
-                    # Return comprehensive JSON response
-                    return {
-                        "status": "success",
-                        "message": "Schedule solved successfully",
-                        "file_info": {
-                            "path": file_path,
-                            "calendar_entries_count": len(calendar_entries),
-                        },
-                        "calendar_entries": calendar_entries,
-                        "solution_status": status_message,
-                        "schedule": final_df.to_dict(
-                            orient="records"
-                        ),  # Convert to list of dicts for JSON
-                        "job_id": job_id,
-                        "polls_required": poll_count + 1,
-                        "processing_time_seconds": processing_time,
-                        "timestamp": time.time(),
-                        "debug_mode": debug_mode,
-                    }
+                        # Return comprehensive JSON response
+                        response_data = {
+                            "status": "success",
+                            "message": "Schedule solved successfully",
+                            "file_info": {
+                                "path": file_path,
+                                "calendar_entries_count": len(calendar_entries),
+                            },
+                            "calendar_entries": calendar_entries,
+                            "solution_status": status_message,
+                            "schedule": final_df.to_dict(
+                                orient="records"
+                            ),  # Convert to list of dicts for JSON
+                            "job_id": job_id,
+                            "polls_required": poll_count + 1,
+                            "processing_time_seconds": processing_time,
+                            "timestamp": time.time(),
+                            "debug_mode": debug_mode,
+                        }
+
+                        logger.debug(
+                            "Returning JSON response with %d schedule entries",
+                            len(response_data["schedule"]),
+                        )
+                        return response_data
+
+                    except Exception as e:
+                        logger.error(
+                            "Error converting schedule to JSON: %s",
+                            e,
+                            exc_info=debug_mode,
+                        )
+                        # Return error response instead of raising
+                        return {
+                            "error": f"Error converting schedule to JSON: {str(e)}",
+                            "status": "conversion_failed",
+                            "job_id": job_id,
+                            "processing_time_seconds": processing_time,
+                            "timestamp": time.time(),
+                            "debug_mode": debug_mode,
+                        }
 
             if debug_mode:
                 logger.debug("Poll %d/%d: Still solving...", poll_count + 1, max_polls)

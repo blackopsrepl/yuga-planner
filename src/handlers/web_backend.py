@@ -1,9 +1,10 @@
 from typing import Tuple
+import os
 
 import pandas as pd
 import gradio as gr
 
-from utils.logging_config import setup_logging, get_logger, is_debug_enabled
+from utils.logging_config import setup_logging, get_logger
 
 # Initialize logging
 setup_logging()
@@ -247,8 +248,6 @@ def _ensure_log_streaming_setup(debug: bool = False) -> None:
     """
     if debug:
         # Force debug mode setup if explicitly requested
-        import os
-
         os.environ["YUGA_DEBUG"] = "true"
         setup_logging("DEBUG")
 

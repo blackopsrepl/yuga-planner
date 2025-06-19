@@ -1,7 +1,8 @@
 from timefold.solver import SolverStatus
 from timefold.solver.domain import *
 from timefold.solver.score import HardSoftDecimalScore
-from datetime import datetime, date
+
+from datetime import date
 from typing import Annotated
 from dataclasses import dataclass, field
 

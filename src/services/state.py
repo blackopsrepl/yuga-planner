@@ -1,6 +1,9 @@
 from typing import Optional
+
 from state import app_state
+
 from constraint_solvers.timetable.domain import EmployeeSchedule
+
 from utils.logging_config import setup_logging, get_logger
 
 # Initialize logging

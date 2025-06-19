@@ -1,4 +1,5 @@
 import os
+import importlib.util
 
 from utils.logging_config import setup_logging, get_logger
 
@@ -19,8 +20,6 @@ def load_secrets(secrets_file: str):
     """
     try:
         # Import secrets from the specified file
-        import importlib.util
-
         spec = importlib.util.spec_from_file_location("secrets", secrets_file)
         secrets = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(secrets)

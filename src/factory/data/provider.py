@@ -1,18 +1,16 @@
 import os
 import pandas as pd
 
-pd.set_option("display.max_columns", None)
-from helpers import schedule_to_dataframe
-
 from datetime import date
 from random import Random
 
-from domain import AGENTS_CONFIG
+pd.set_option("display.max_columns", None)
+from factory.data.formatters import schedule_to_dataframe
 
-from factory.data_generators import *
-from factory.data_models import *
+from factory.data.generators import *
+from factory.data.models import *
 
-from agents.task_composer_agent import TaskComposerAgent
+from factory.agents.task_composer_agent import TaskComposerAgent
 
 from constraint_solvers.timetable.domain import *
 
@@ -173,8 +171,6 @@ async def generate_mcp_data(
     # --- LLM TASKS ---
     llm_tasks = []
     if user_message:
-        from factory.data_provider import run_task_composer_agent
-
         agent_output = await run_task_composer_agent(user_message, parameters)
         llm_tasks = tasks_from_agent_output(agent_output, parameters, "PROJECT")
         for t in llm_tasks:
@@ -274,32 +270,18 @@ async def generate_mcp_data(
 async def run_task_composer_agent(
     input_str: str, parameters: TimeTableDataParameters
 ) -> list:
-    agent = TaskComposerAgent(AGENTS_CONFIG)
-    available_skills = list(parameters.skill_set.required_skills) + list(
-        parameters.skill_set.optional_skills
-    )
-    context = f"Project scheduling for {parameters.employee_count} employees over {parameters.days_in_schedule} days"
-
-    logger.info(
-        "Starting task composer workflow - timeout: %ds, input length: %d chars",
-        AGENTS_CONFIG.workflow_timeout,
-        len(input_str),
-    )
-
-    logger.debug("Available skills: %s", available_skills)
-
+    """Runs the task composition agent with the given input and parameters."""
     try:
-        agent_output = await agent.run_workflow(
-            query=input_str, skills=available_skills, context=context
-        )
+        # Initialize the agent
+        agent = TaskComposerAgent()
 
-        logger.info(
-            "Task composer workflow completed successfully - generated %d tasks",
-            len(agent_output),
-        )
+        # Run the agent with the input
+        output = await agent.compose_tasks(input_str, parameters)
 
-        return agent_output
+        logger.debug("Agent output: %s", output)
+        return output
 
     except Exception as e:
-        logger.error("Task composer workflow failed: %s", e)
-        raise
+        logger.error("Error running task composer agent: %s", e)
+        # Return empty list on error
+        return []

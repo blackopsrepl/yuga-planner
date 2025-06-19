@@ -1,5 +1,7 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import pandas as pd
+
+from factory.data.generators import earliest_monday_on_or_after
 
 
 def schedule_to_dataframe(schedule) -> pd.DataFrame:
@@ -21,9 +23,6 @@ def schedule_to_dataframe(schedule) -> pd.DataFrame:
 
         # Calculate start and end times based on 30-minute slots
         # Schedule starts from next Monday at 8 AM
-        from datetime import date
-        from factory.data_generators import earliest_monday_on_or_after
-
         base_date = earliest_monday_on_or_after(date.today())
         base_datetime = datetime.combine(
             base_date, datetime.min.time().replace(hour=8)

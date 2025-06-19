@@ -16,9 +16,11 @@ from agents.task_composer_agent import TaskComposerAgent
 
 from constraint_solvers.timetable.domain import *
 
-import logging
+from utils.logging_config import setup_logging, get_logger
 
-logging.basicConfig(level=logging.INFO)
+# Initialize logging
+setup_logging()
+logger = get_logger(__name__)
 
 # =========================
 #        CONSTANTS
@@ -102,8 +104,7 @@ async def generate_agent_data(
     employees: list[Employee] = generate_employees(parameters, randomizer)
     total_slots: int = parameters.days_in_schedule * SLOTS_PER_DAY
 
-    if os.getenv("YUGA_DEBUG", "false").lower() == "true":
-        logging.info("FILE OBJECT: %s %s", file, type(file))
+    logger.debug("Processing file object: %s (type: %s)", file, type(file))
 
     match file:
         case file if hasattr(file, "read"):
@@ -158,12 +159,44 @@ async def generate_mcp_data(
 
     start_date: date = earliest_monday_on_or_after(date.today())
     randomizer: Random = Random(parameters.random_seed)
-    employees: list[Employee] = generate_employees(parameters, randomizer)
     total_slots: int = parameters.days_in_schedule * SLOTS_PER_DAY
+
+    # --- CALENDAR TASKS ---
+    calendar_tasks = generate_tasks_from_calendar(
+        parameters, randomizer, calendar_entries
+    )
+    # Assign project_id 'EXISTING' to all calendar tasks
+    for t in calendar_tasks:
+        t.sequence_number = 0  # will be overwritten later
+        t.project_id = "EXISTING"
+
+    # --- LLM TASKS ---
+    llm_tasks = []
+    if user_message:
+        from factory.data_provider import run_task_composer_agent
+
+        agent_output = await run_task_composer_agent(user_message, parameters)
+        llm_tasks = tasks_from_agent_output(agent_output, parameters, "PROJECT")
+        for t in llm_tasks:
+            t.sequence_number = 0  # will be overwritten later
+            t.project_id = "PROJECT"
+
+    # --- ANALYZE REQUIRED SKILLS ---
+    all_tasks = calendar_tasks + llm_tasks
+    required_skills_needed = set()
+    for task in all_tasks:
+        if hasattr(task, "required_skill") and task.required_skill:
+            required_skills_needed.add(task.required_skill)
+
+    # --- GENERATE EMPLOYEES WITH REQUIRED SKILLS ---
+    employees: list[Employee] = generate_employees(
+        parameters, randomizer, required_skills_needed
+    )
 
     # Set the single employee's name to 'Chatbot User'
     if len(employees) == 1:
         employees[0].name = "Chatbot User"
+
     else:
         raise ValueError("MCP data provider only supports one employee")
 
@@ -173,16 +206,11 @@ async def generate_mcp_data(
         emp.undesired_dates.clear()
         emp.desired_dates.clear()
 
-    # --- CALENDAR TASKS ---
-    calendar_tasks = generate_tasks_from_calendar(
-        parameters, randomizer, calendar_entries
-    )
-    # Assign project_id 'EXISTING' to all calendar tasks
-    for t in calendar_tasks:
-        t.sequence_number = 0  # will be overwritten later
+    # --- ASSIGN EMPLOYEES TO TASKS ---
+    for t in all_tasks:
         t.employee = employees[0]
-        t.project_id = "EXISTING"
-    # Create DataFrame
+
+    # Create DataFrames for debugging
     calendar_df = pd.DataFrame(
         [
             {
@@ -199,20 +227,8 @@ async def generate_mcp_data(
         ]
     )
 
-    print("\nCalendar DataFrame:")
-    print(calendar_df)
+    logger.debug("Generated calendar tasks DataFrame:\n%s", calendar_df)
 
-    # --- LLM TASKS ---
-    llm_tasks = []
-    if user_message:
-        from factory.data_provider import run_task_composer_agent
-
-        agent_output = await run_task_composer_agent(user_message, parameters)
-        llm_tasks = tasks_from_agent_output(agent_output, parameters, "PROJECT")
-        for t in llm_tasks:
-            t.sequence_number = 0  # will be overwritten later
-            t.employee = employees[0]
-            t.project_id = "PROJECT"
     llm_df = pd.DataFrame(
         [
             {
@@ -229,12 +245,9 @@ async def generate_mcp_data(
         ]
     )
 
-    print("\nLLM DataFrame:")
-    print(llm_df)
+    logger.debug("Generated LLM tasks DataFrame:\n%s", llm_df)
 
-    # --- MERGE AND ASSIGN SEQUENCE ---
-    all_tasks = calendar_tasks + llm_tasks
-    # Assign sequence_number per project group
+    # --- ASSIGN SEQUENCE NUMBERS ---
     existing_seq = 0
     project_seq = 0
     for t in all_tasks:
@@ -250,9 +263,11 @@ async def generate_mcp_data(
         tasks=all_tasks,
         schedule_info=ScheduleInfo(total_slots=total_slots),
     )
+
     final_df = schedule_to_dataframe(schedule)
-    print("\nFinal DataFrame (MCP-aligned):")
-    print(final_df)
+
+    logger.debug("Final schedule DataFrame (MCP-aligned):\n%s", final_df)
+
     return final_df
 
 
@@ -265,18 +280,26 @@ async def run_task_composer_agent(
     )
     context = f"Project scheduling for {parameters.employee_count} employees over {parameters.days_in_schedule} days"
 
-    logging.info(f"Starting workflow with timeout: {AGENTS_CONFIG.workflow_timeout}s")
-    logging.info(f"Input length: {len(input_str)} characters")
-    logging.info(f"Available skills: {available_skills}")
+    logger.info(
+        "Starting task composer workflow - timeout: %ds, input length: %d chars",
+        AGENTS_CONFIG.workflow_timeout,
+        len(input_str),
+    )
+
+    logger.debug("Available skills: %s", available_skills)
 
     try:
         agent_output = await agent.run_workflow(
             query=input_str, skills=available_skills, context=context
         )
-        logging.info(
-            f"Workflow completed successfully. Generated {len(agent_output)} tasks."
+
+        logger.info(
+            "Task composer workflow completed successfully - generated %d tasks",
+            len(agent_output),
         )
+
         return agent_output
+
     except Exception as e:
-        logging.error(f"Workflow failed: {e}")
+        logger.error("Task composer workflow failed: %s", e)
         raise

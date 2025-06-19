@@ -3,6 +3,12 @@ import threading
 from datetime import datetime
 from typing import List
 
+from utils.logging_config import setup_logging, get_logger, is_debug_enabled
+
+# Initialize logging
+setup_logging()
+logger = get_logger(__name__)
+
 
 class LogCapture:
     """Helper class to capture logs for streaming to UI"""
@@ -52,20 +58,32 @@ class LoggingService:
 
     def setup_log_streaming(self) -> None:
         """Set up log streaming to capture logs for UI"""
-        logger = logging.getLogger()
+        # Use the root logger which is configured by our centralized system
+        root_logger = logging.getLogger()
 
-        # Remove existing handlers to avoid duplicate logs
-        for handler in logger.handlers[:]:
+        # Remove existing streaming handlers to avoid duplicates
+        for handler in root_logger.handlers[:]:
             if isinstance(handler, StreamingLogHandler):
-                logger.removeHandler(handler)
+                root_logger.removeHandler(handler)
 
         # Add our streaming handler
         stream_handler = StreamingLogHandler(self.log_capture)
-        stream_handler.setLevel(logging.INFO)
-        formatter = logging.Formatter("%(levelname)s - %(message)s")
+
+        # Respect the debug flag when setting the handler level
+        if is_debug_enabled():
+            stream_handler.setLevel(logging.DEBUG)
+            logger.debug("UI log streaming configured for DEBUG level")
+        else:
+            stream_handler.setLevel(logging.INFO)
+            logger.debug("UI log streaming configured for INFO level")
+
+        # Use a more detailed formatter for UI streaming
+        formatter = logging.Formatter("%(levelname)s - %(name)s - %(message)s")
         stream_handler.setFormatter(formatter)
-        logger.addHandler(stream_handler)
+        root_logger.addHandler(stream_handler)
         self._handler_added = True
+
+        logger.debug("UI log streaming handler added to root logger")
 
     def get_streaming_logs(self) -> str:
         """Get accumulated logs for streaming to UI"""
@@ -73,6 +91,7 @@ class LoggingService:
 
     def clear_streaming_logs(self) -> None:
         """Clear accumulated logs"""
+        logger.debug("Clearing UI streaming logs")
         self.log_capture.clear()
 
     def is_setup(self) -> bool:

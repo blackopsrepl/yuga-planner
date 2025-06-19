@@ -56,6 +56,8 @@ class Task:
     project_id: str = ""
     # Sequence number within the project to maintain original task order
     sequence_number: int = 0
+    # Whether this task is pinned to its current assignment (for calendar events)
+    pinned: Annotated[bool, PlanningPin] = False
     employee: Annotated[
         Employee | None, PlanningVariable(value_range_provider_refs=["employeeRange"])
     ] = None
@@ -69,6 +71,7 @@ class Task:
             "required_skill": self.required_skill,
             "project_id": self.project_id,
             "sequence_number": self.sequence_number,
+            "pinned": self.pinned,
             "employee": self.employee.to_dict() if self.employee else None,
         }
 
@@ -82,6 +85,7 @@ class Task:
             required_skill=d["required_skill"],
             project_id=d.get("project_id", ""),
             sequence_number=d.get("sequence_number", 0),
+            pinned=d.get("pinned", False),
             employee=Employee.from_dict(d["employee"]) if d["employee"] else None,
         )
 

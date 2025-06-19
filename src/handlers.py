@@ -1,16 +1,20 @@
-import logging
-from typing import Tuple, Dict, List, Optional
+from typing import Tuple
 
 import pandas as pd
 import gradio as gr
 
-from state import app_state
+from utils.logging_config import setup_logging, get_logger, is_debug_enabled
+
+# Initialize logging
+setup_logging()
+logger = get_logger(__name__)
 
 from services import (
     LoggingService,
     ScheduleService,
     DataService,
     MockProjectService,
+    StateService,
 )
 
 # Global logging service instance for UI streaming
@@ -21,16 +25,18 @@ async def show_solved(
     state_data, job_id: str, debug: bool = False
 ) -> Tuple[pd.DataFrame, pd.DataFrame, str, str, object, str]:
     """Handler for solving a schedule from UI state data"""
-    # Set up log streaming for solving process
-    logging_service.setup_log_streaming()
+    # Ensure log streaming is set up and respects debug mode
+    _ensure_log_streaming_setup(debug)
 
-    logging.info(
-        f"🔧 show_solved called with state_data type: {type(state_data)}, job_id: {job_id}"
+    logger.info(
+        "show_solved called with state_data type: %s, job_id: %s",
+        type(state_data),
+        job_id,
     )
 
     # Check if data has been loaded
     if not state_data:
-        logging.warning("❌ No data loaded - cannot solve schedule")
+        logger.warning("No data loaded - cannot solve schedule")
         return (
             gr.update(),
             gr.update(),
@@ -40,7 +46,7 @@ async def show_solved(
             logging_service.get_streaming_logs(),
         )
 
-    logging.info(f"✅ State data found, proceeding with solve...")
+    logger.info("State data found, proceeding with solve...")
 
     try:
         # Use the schedule service to solve the schedule
@@ -54,7 +60,7 @@ async def show_solved(
             state_data, job_id, debug=debug
         )
 
-        logging.info(f"✅ Solver completed successfully, returning results")
+        logger.info("Solver completed successfully, returning results")
 
         return (
             emp_df,
@@ -65,7 +71,7 @@ async def show_solved(
             logging_service.get_streaming_logs(),
         )
     except Exception as e:
-        logging.error(f"Error in show_solved: {e}")
+        logger.error("Error in show_solved: %s", e)
         return (
             gr.update(),
             gr.update(),
@@ -95,12 +101,14 @@ async def load_data(
     Handler for data loading from either file uploads or mock projects - streaming version
     Yields intermediate updates for real-time progress
     """
-    # Set up log streaming and clear previous logs
-    logging_service.setup_log_streaming()
+    # Ensure log streaming is set up and clear previous logs
+    _ensure_log_streaming_setup(debug)
     logging_service.clear_streaming_logs()
 
     # Initial log message
-    logging.info("🚀 Starting data loading process...")
+    logger.info("Starting data loading process...")
+    if debug:
+        logger.debug("Debug mode enabled for data loading")
 
     # Yield initial state
     yield (
@@ -131,7 +139,9 @@ async def load_data(
         )
 
         # Store schedule for later use
-        app_state.add_solved_schedule(job_id, None)  # Will be populated when solved
+        StateService.store_solved_schedule(
+            job_id, None
+        )  # Will be populated when solved
 
         # Final yield with complete results
         yield (
@@ -145,7 +155,7 @@ async def load_data(
         )
 
     except Exception as e:
-        logging.error(f"Error loading data: {e}")
+        logger.error("Error loading data: %s", e)
         yield (
             gr.update(),
             gr.update(),
@@ -181,25 +191,25 @@ def poll_solution(
             job_id,
             status_message,
             schedule,
-            gr.update(),  # log_terminal
+            logging_service.get_streaming_logs(),  # Include logs in polling updates
         )
 
     except Exception as e:
-        logging.error(f"Error in poll_solution: {e}")
+        logger.error("Error in poll_solution: %s", e)
         return (
             gr.update(),
             gr.update(),
             job_id,
             f"Error polling solution: {str(e)}",
             schedule,
-            gr.update(),  # log_terminal
+            logging_service.get_streaming_logs(),  # Include logs even on error
         )
 
 
 async def auto_poll(
     job_id: str, llm_output: dict, debug: bool = False
 ) -> Tuple[pd.DataFrame, pd.DataFrame, str, str, dict, str]:
-    """Handler for automatic polling of updates"""
+    """Handler for auto-polling a solution"""
     try:
         (
             emp_df,
@@ -210,21 +220,40 @@ async def auto_poll(
         ) = await ScheduleService.auto_poll(job_id, llm_output, debug)
 
         return (
-            emp_df,  # employees_table
-            task_df,  # schedule_table
-            job_id,  # job_id_state
-            status_message,  # status_text
-            llm_output,  # llm_output_state
-            logging_service.get_streaming_logs(),  # log_terminal
+            emp_df,
+            task_df,
+            job_id,
+            status_message,
+            llm_output,
+            logging_service.get_streaming_logs(),  # Include logs in auto-poll updates
         )
 
     except Exception as e:
-        logging.error(f"Error in auto_poll: {e}")
+        logger.error("Error in auto_poll: %s", e)
         return (
             gr.update(),
             gr.update(),
             job_id,
-            f"Error in auto polling: {str(e)}",
+            f"Error in auto-polling: {str(e)}",
             llm_output,
-            logging_service.get_streaming_logs(),  # log_terminal
+            logging_service.get_streaming_logs(),  # Include logs even on error
         )
+
+
+def _ensure_log_streaming_setup(debug: bool = False) -> None:
+    """
+    Ensure log streaming is properly set up with current debug settings.
+    This helps maintain consistency when debug mode changes at runtime.
+    """
+    if debug:
+        # Force debug mode setup if explicitly requested
+        import os
+
+        os.environ["YUGA_DEBUG"] = "true"
+        setup_logging("DEBUG")
+
+    # Always setup streaming (it will respect current logging level)
+    logging_service.setup_log_streaming()
+
+    if debug:
+        logger.debug("Log streaming setup completed with debug mode enabled")

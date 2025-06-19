@@ -118,14 +118,17 @@ def no_overlapping_tasks(constraint_factory: ConstraintFactory):
     return (
         constraint_factory.for_each_unique_pair(
             Task,
-            Joiners.equal(lambda task: task.employee.name),
+            Joiners.equal(lambda task: task.employee),  # Same employee
             Joiners.overlapping(
                 lambda task: task.start_slot,
                 lambda task: task.start_slot + task.duration_slots,
             ),
         )
+        .filter(
+            lambda task1, task2: task1.employee is not None
+        )  # Only check assigned tasks
         .penalize(HardSoftDecimalScore.ONE_HARD, get_slot_overlap)
-        .as_constraint("No overlapping tasks")
+        .as_constraint("No overlapping tasks for same employee")
     )
 
 
@@ -194,10 +197,11 @@ def maintain_project_task_order(constraint_factory: ConstraintFactory):
         .join(Task)
         .filter(tasks_violate_sequence_order)
         .penalize(
-            HardSoftDecimalScore.ONE_SOFT,
-            lambda task1, task2: 100
-            * (task1.start_slot + task1.duration_slots - task2.start_slot),
-        )  # High penalty (100x) proportional to overlap to strongly encourage proper sequencing
+            HardSoftDecimalScore.ONE_HARD,  # Make this a HARD constraint
+            lambda task1, task2: task1.start_slot
+            + task1.duration_slots
+            - task2.start_slot,
+        )  # Penalty proportional to overlap
         .as_constraint("Project task sequence order")
     )
 

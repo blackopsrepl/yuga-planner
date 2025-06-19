@@ -1,9 +1,11 @@
-import re, logging
+import re
 
 from utils.markdown_analyzer import MarkdownAnalyzer
+from utils.logging_config import setup_logging, get_logger
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Initialize logging
+setup_logging()
+logger = get_logger(__name__)
 
 
 ### MARKDOWN UTILS ###

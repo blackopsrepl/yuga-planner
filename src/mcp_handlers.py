@@ -1,116 +1,224 @@
-import os
-from dataclasses import dataclass
-import uuid
+"""
+MCP (Model Context Protocol) Handlers for Yuga Planner
+
+This module provides an MCP tool endpoint for external integrations and is separate from the Gradio UI's workflow.
+
+Key Features:
+- Centralized logging integration with debug mode support
+- Performance timing for API monitoring
+- Comprehensive error handling for external consumers
+- Automatic debug mode detection from environment variables
+
+Usage:
+    The main endpoint is registered as a Gradio API and can be called by MCP clients:
+
+    POST /api/process_message_and_attached_file
+    {
+        "file_path": "/path/to/calendar.ics",
+        "message_body": "Create tasks for this week's meetings"
+    }
+
+Environment Variables:
+    YUGA_DEBUG: Set to "true" to enable detailed debug logging for API requests
+
+Logging:
+    - Uses centralized logging system from utils.logging_config
+    - Respects YUGA_DEBUG environment variable (from CLI flag --debug)
+    - Includes performance timing and detailed error information
+    - Provides different log levels for production vs development usage
+"""
+
 import time
-import asyncio
 
 from utils.extract_calendar import extract_ical_entries
+
 from factory.data_provider import generate_mcp_data
-from services.schedule_service import ScheduleService
+from services import ScheduleService, StateService
+from helpers import schedule_to_dataframe
 
+from utils.logging_config import setup_logging, get_logger, is_debug_enabled
 
-@dataclass
-class MCPProcessingResult:
-    user_message: str
-    file: str
-    calendar_entries: list = None
-    error: str = None
-    solved_task_df: object = None
-    status: str = None
-    score: object = None
+setup_logging()
+logger = get_logger(__name__)
 
 
 async def process_message_and_attached_file(file_path: str, message_body: str) -> dict:
     """
-    Store the last chat message and attached file, echo the message, extract calendar entries, generate tasks, solve, and poll for the solution.
+    MCP API endpoint for processing calendar files and task descriptions.
+
+    This is a separate workflow from the main Gradio UI and handles external API requests.
+
     Args:
-        file_path (str): Path to the attached file
+        file_path (str): Path to the attached file (typically .ics calendar file)
         message_body (str): The body of the last chat message, which contains the task description
     Returns:
         dict: Contains confirmation, file info, calendar entries, error, and solved schedule info
     """
+
+    # Determine debug mode from environment or default to False for API calls
+    debug_mode = is_debug_enabled()
+
+    logger.info("MCP Handler: Processing message with attached file")
+    logger.debug("File path: %s", file_path)
+    logger.debug("Message: %s", message_body)
+    logger.debug("Debug mode: %s", debug_mode)
+
+    # Track timing for API performance
+    start_time = time.time()
+
     try:
+        # Step 1: Extract calendar entries from the attached file
+        logger.info("Step 1: Extracting calendar entries...")
+
         with open(file_path, "rb") as f:
             file_bytes = f.read()
-    except Exception as e:
-        result = MCPProcessingResult(
-            user_message="",
-            file="",
-            calendar_entries=[],
-            error=f"Failed to read file: {e}",
+
+        calendar_entries, error = extract_ical_entries(file_bytes)
+
+        if error:
+            logger.error("Failed to extract calendar entries: %s", error)
+            return {
+                "error": f"Failed to extract calendar entries: {error}",
+                "status": "failed",
+                "timestamp": time.time(),
+                "processing_time_seconds": time.time() - start_time,
+            }
+
+        logger.info("Extracted %d calendar entries", len(calendar_entries))
+        if debug_mode:
+            logger.debug(
+                "Calendar entries details: %s",
+                [e.get("summary", "No summary") for e in calendar_entries[:5]],
+            )
+
+        # Step 2: Generate MCP data (combines calendar and LLM tasks)
+        logger.info("Step 2: Generating tasks using MCP data provider...")
+
+        schedule_data = await generate_mcp_data(
+            calendar_entries=calendar_entries,
+            user_message=message_body,
+            project_id="PROJECT",
+            employee_count=1,  # MCP uses single user
+            days_in_schedule=365,
         )
-        return result.__dict__
 
-    # Try to extract calendar entries
-    entries, error = extract_ical_entries(file_bytes)
-    if error:
-        result = MCPProcessingResult(
-            user_message=f"Received your message: {message_body}",
-            file=os.path.basename(file_path),
-            error=f"File is not a valid calendar file: {error}",
-        )
-        return result.__dict__
+        logger.info("Generated schedule with %d total tasks", len(schedule_data))
 
-    # Generate MCP DataFrame
-    df = await generate_mcp_data(entries, message_body)
-    if df is None or df.empty:
-        result = MCPProcessingResult(
-            user_message=f"Received your message: {message_body}",
-            file=os.path.basename(file_path),
-            calendar_entries=entries,
-            error="Failed to generate MCP data.",
-        )
-        return result.__dict__
+        # Step 3: Convert to format needed for solving
+        logger.info("Step 3: Preparing schedule for solving...")
 
-    # Build state_data for the solver
-    state_data = {
-        "task_df_json": df.to_json(orient="split"),
-        "employee_count": 1,
-        "days_in_schedule": 365,
-    }
-    job_id = str(uuid.uuid4())
-    (
-        emp_df,
-        solved_task_df,
-        new_job_id,
-        status,
-        state_data,
-    ) = await ScheduleService.solve_schedule_from_state(state_data, job_id, debug=True)
+        # Create state data format expected by ScheduleService
+        state_data = {
+            "task_df_json": schedule_data.to_json(orient="split"),
+            "employee_count": 1,
+            "days_in_schedule": 365,
+        }
 
-    # Poll for the solution until the status string does not contain 'Solving'
-    max_wait = 30  # seconds
-    interval = 0.5
-    waited = 0
-    final_task_df = None
-    final_status = None
-    final_score = None
-    solved = False
-    while waited < max_wait:
+        # Step 4: Start solving the schedule
+        logger.info("Step 4: Starting schedule solver...")
+
         (
-            _,
-            polled_task_df,
-            _,
-            polled_status,
-            solved_schedule,
-        ) = ScheduleService.poll_solution(new_job_id, None, debug=True)
-        if polled_status and "Solving" not in polled_status:
-            final_task_df = polled_task_df
-            final_status = polled_status
-            final_score = getattr(solved_schedule, "score", None)
-            solved = True
-            break
-        await asyncio.sleep(interval)
-        waited += interval
+            emp_df,
+            task_df,
+            job_id,
+            status,
+            state_data,
+        ) = await ScheduleService.solve_schedule_from_state(
+            state_data=state_data,
+            job_id=None,
+            debug=debug_mode,  # Respect debug mode for MCP calls
+        )
 
-    result = MCPProcessingResult(
-        user_message=f"Received your message: {message_body}",
-        file=os.path.basename(file_path),
-        calendar_entries=entries,
-        solved_task_df=final_task_df.to_dict(orient="records")
-        if final_task_df is not None
-        else None,
-        status=final_status,
-        score=final_score,
-        error=None if solved else "Solver did not finish within the timeout",
-    )
-    return result.__dict__
+        logger.info("Solver started with job_id: %s", job_id)
+        logger.debug("Initial status: %s", status)
+
+        # Step 5: Poll until the schedule is solved
+        logger.info("Step 5: Polling for solution...")
+
+        max_polls = 60  # Maximum 60 polls (about 2 minutes)
+        poll_interval = 2  # Poll every 2 seconds
+
+        for poll_count in range(max_polls):
+            if StateService.has_solved_schedule(job_id):
+                solved_schedule = StateService.get_solved_schedule(job_id)
+
+                # Check if we have a valid solution
+                if solved_schedule and solved_schedule.score is not None:
+                    processing_time = time.time() - start_time
+                    logger.info(
+                        "Schedule solved after %d polls! (Total time: %.2fs)",
+                        poll_count + 1,
+                        processing_time,
+                    )
+
+                    # Convert to final dataframe
+                    final_df = schedule_to_dataframe(solved_schedule)
+
+                    # Generate status message
+                    status_message = ScheduleService.generate_status_message(
+                        solved_schedule
+                    )
+
+                    logger.info("Final Status: %s", status_message)
+
+                    # Return comprehensive JSON response
+                    return {
+                        "status": "success",
+                        "message": "Schedule solved successfully",
+                        "file_info": {
+                            "path": file_path,
+                            "calendar_entries_count": len(calendar_entries),
+                        },
+                        "calendar_entries": calendar_entries,
+                        "solution_status": status_message,
+                        "schedule": final_df.to_dict(
+                            orient="records"
+                        ),  # Convert to list of dicts for JSON
+                        "job_id": job_id,
+                        "polls_required": poll_count + 1,
+                        "processing_time_seconds": processing_time,
+                        "timestamp": time.time(),
+                        "debug_mode": debug_mode,
+                    }
+
+            if debug_mode:
+                logger.debug("Poll %d/%d: Still solving...", poll_count + 1, max_polls)
+
+            time.sleep(poll_interval)
+
+        # If we get here, polling timed out
+        processing_time = time.time() - start_time
+        logger.warning(
+            "Polling timed out after %.2fs - returning partial results", processing_time
+        )
+
+        return {
+            "status": "timeout",
+            "message": "Schedule solving timed out after maximum polls",
+            "file_info": {
+                "path": file_path,
+                "calendar_entries_count": len(calendar_entries),
+            },
+            "calendar_entries": calendar_entries,
+            "job_id": job_id,
+            "max_polls_reached": max_polls,
+            "processing_time_seconds": processing_time,
+            "timestamp": time.time(),
+            "debug_mode": debug_mode,
+        }
+
+    except Exception as e:
+        processing_time = time.time() - start_time
+        logger.error(
+            "MCP handler error after %.2fs: %s", processing_time, e, exc_info=debug_mode
+        )
+
+        return {
+            "error": str(e),
+            "status": "failed",
+            "file_path": file_path,
+            "message_body": message_body,
+            "processing_time_seconds": processing_time,
+            "timestamp": time.time(),
+            "debug_mode": debug_mode,
+        }

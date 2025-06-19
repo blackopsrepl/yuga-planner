@@ -1,4 +1,4 @@
-import os
+import os, warnings
 from dataclasses import dataclass
 
 # =========================
@@ -78,7 +78,7 @@ class AgentsConfig:
     nebius_model: str
 
     # Prompt templates
-    task_splitter_prompt: str = "Split the following task into an accurate and concise tree of required subtasks:\n{{query}}\n\nYour output must be a markdown bullet list, with no additional comments.\n\n"
+    task_splitter_prompt: str = "Split the following task into an accurate and concise tree of required subtasks:\n{{query}}\n\nAim for 3 to 15 subtasks.\n\nYour output must be a markdown bullet list, with no additional comments.\n\n"
     task_evaluator_prompt: str = "Evaluate the elapsed time, in 30 minute units, for a competent human to complete the following task:\n{{query}}\n\nYour output must be a one integer, with no additional comments.\n\n"
     task_deps_matcher_prompt: str = "Given the following task:\n{{task}}\n\nAnd these available skills:\n{{skills}}\n\nIn this context:\n{{context}}\n\nSelect the most appropriate skill to complete this task. Return only the skill name as a string, with no additional comments or formatting.\n\n"
 
@@ -95,12 +95,10 @@ class AgentsConfig:
         """Validate required configuration"""
         if not self.nebius_model or not self.nebius_api_key:
             if self.nebius_model == "dev-model" and self.nebius_api_key == "dev-key":
-                # Development mode - just warn
-                import warnings
-
                 warnings.warn(
                     "Using development defaults for NEBIUS_MODEL and NEBIUS_API_KEY"
                 )
+
             else:
                 raise ValueError(
                     "NEBIUS_MODEL and NEBIUS_API_KEY environment variables must be set"

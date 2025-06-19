@@ -1,7 +1,10 @@
-import os, logging
+import os
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from utils.logging_config import setup_logging, get_logger
+
+# Initialize logging
+setup_logging()
+logger = get_logger(__name__)
 
 ### SECRETS ###
 def load_secrets(secrets_file: str):

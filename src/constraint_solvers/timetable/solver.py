@@ -16,7 +16,7 @@ solver_config: SolverConfig = SolverConfig(
     score_director_factory_config=ScoreDirectorFactoryConfig(
         constraint_provider_function=define_constraints
     ),
-    termination_config=TerminationConfig(spent_limit=Duration(seconds=30)),
+    # termination_config=TerminationConfig(spent_limit=Duration(seconds=30)),  # Commented out to allow unlimited solving time
 )
 
 solver_manager: SolverManager = SolverManager.create(

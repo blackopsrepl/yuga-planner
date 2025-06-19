@@ -23,10 +23,13 @@ LAST_NAMES = (
 
 
 def generate_employees(
-    parameters: TimeTableDataParameters, random: Random
+    parameters: TimeTableDataParameters,
+    random: Random,
+    required_skills_needed: set[str] = None,
 ) -> list[Employee]:
     """
     Generates a list of Employee objects with random names and skills.
+    Ensures that collectively the employees have all required_skills_needed.
     """
     name_permutations = [
         f"{first_name} {last_name}"
@@ -36,19 +39,60 @@ def generate_employees(
     random.shuffle(name_permutations)
 
     employees = []
-    for i in range(parameters.employee_count):
-        (count,) = random.choices(
-            population=counts(parameters.optional_skill_distribution),
-            weights=weights(parameters.optional_skill_distribution),
-        )
 
-        # Ensure we don't try to sample more skills than available
-        count = min(count, len(parameters.skill_set.optional_skills))
+    # If specific skills are needed, ensure they're covered
+    if required_skills_needed:
+        skills_needed = set(required_skills_needed)
 
-        skills = []
-        skills += random.sample(parameters.skill_set.optional_skills, count)
-        skills += random.sample(parameters.skill_set.required_skills, 1)
-        employees.append(Employee(name=name_permutations[i], skills=set(skills)))
+        # For single employee (MCP case), give them all needed skills plus some random ones
+        if parameters.employee_count == 1:
+            all_available_skills = list(parameters.skill_set.required_skills) + list(
+                parameters.skill_set.optional_skills
+            )
+            # Give all available skills to the single employee to handle any task
+            employees.append(
+                Employee(name=name_permutations[0], skills=set(all_available_skills))
+            )
+            return employees
+
+        # For multiple employees, distribute needed skills and add random skills
+        for i in range(parameters.employee_count):
+            (count,) = random.choices(
+                population=counts(parameters.optional_skill_distribution),
+                weights=weights(parameters.optional_skill_distribution),
+            )
+            count = min(count, len(parameters.skill_set.optional_skills))
+
+            skills = []
+
+            # Ensure each employee gets at least one required skill
+            skills += random.sample(parameters.skill_set.required_skills, 1)
+
+            # Add random optional skills
+            skills += random.sample(parameters.skill_set.optional_skills, count)
+
+            # If there are still skills needed and this is one of the first employees,
+            # ensure they get some of the needed skills
+            if skills_needed and i < len(skills_needed):
+                needed_skill = skills_needed.pop()
+                if needed_skill not in skills:
+                    skills.append(needed_skill)
+
+            employees.append(Employee(name=name_permutations[i], skills=set(skills)))
+
+    else:
+        # Original random generation when no specific skills are needed
+        for i in range(parameters.employee_count):
+            (count,) = random.choices(
+                population=counts(parameters.optional_skill_distribution),
+                weights=weights(parameters.optional_skill_distribution),
+            )
+            count = min(count, len(parameters.skill_set.optional_skills))
+
+            skills = []
+            skills += random.sample(parameters.skill_set.optional_skills, count)
+            skills += random.sample(parameters.skill_set.required_skills, 1)
+            employees.append(Employee(name=name_permutations[i], skills=set(skills)))
 
     return employees
 
@@ -185,11 +229,14 @@ def generate_tasks_from_calendar(
                 duration_slots = max(1, duration_minutes // 30)
             else:
                 duration_slots = 2  # Default 1 hour
+
             # Randomize required_skill as in generate_tasks
             if random.random() >= 0.5:
                 required_skill = random.choice(parameters.skill_set.required_skills)
+
             else:
                 required_skill = random.choice(parameters.skill_set.optional_skills)
+
             tasks.append(
                 Task(
                     id=next(ids),
@@ -199,8 +246,10 @@ def generate_tasks_from_calendar(
                     required_skill=required_skill,
                 )
             )
+
         except Exception:
             continue
+
     return tasks
 
 
@@ -292,9 +341,3 @@ def tasks_from_agent_output(agent_output, parameters, project_id: str = ""):
             )
         )
     return tasks
-
-
-def skills_from_parameters(parameters: TimeTableDataParameters) -> list[str]:
-    return list(parameters.skill_set.required_skills) + list(
-        parameters.skill_set.optional_skills
-    )

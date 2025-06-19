@@ -20,7 +20,15 @@ def schedule_to_dataframe(schedule) -> pd.DataFrame:
         employee: str = task.employee.name if task.employee else "Unassigned"
 
         # Calculate start and end times based on 30-minute slots
-        start_time: datetime = datetime.now() + timedelta(minutes=30 * task.start_slot)
+        # Schedule starts from next Monday at 8 AM
+        from datetime import date
+        from factory.data_generators import earliest_monday_on_or_after
+
+        base_date = earliest_monday_on_or_after(date.today())
+        base_datetime = datetime.combine(
+            base_date, datetime.min.time().replace(hour=8)
+        )  # Start at 8 AM Monday
+        start_time: datetime = base_datetime + timedelta(minutes=30 * task.start_slot)
         end_time: datetime = start_time + timedelta(minutes=30 * task.duration_slots)
 
         # Add task data to list with availability flags

@@ -1,13 +1,11 @@
-import uuid
-import logging
-import random
+import os, uuid, random
 from datetime import datetime
 from typing import Tuple, Dict, Any, Optional
 
 import pandas as pd
 import gradio as gr
 
-from state import app_state
+from .state_service import StateService
 from constraint_solvers.timetable.solver import solver_manager
 from factory.data_provider import (
     generate_employees,
@@ -17,15 +15,16 @@ from factory.data_provider import (
     SLOTS_PER_DAY,
 )
 
-from constraint_solvers.timetable.domain import (
-    EmployeeSchedule,
-    ScheduleInfo,
-    Task,
-)
+from constraint_solvers.timetable.domain import EmployeeSchedule, ScheduleInfo
 
 from helpers import schedule_to_dataframe, employees_to_dataframe
 from .data_service import DataService
 from constraint_solvers.timetable.analysis import ConstraintViolationAnalyzer
+from utils.logging_config import setup_logging, get_logger
+
+# Initialize logging
+setup_logging()
+logger = get_logger(__name__)
 
 
 class ScheduleService:
@@ -46,33 +45,25 @@ class ScheduleService:
         Returns:
             Tuple of (emp_df, task_df, new_job_id, status_message, state_data)
         """
-        logging.info(f"🔧 solve_schedule_from_state called with job_id: {job_id}")
-        logging.info("🚀 Starting solve process...")
-
-        # Set debug environment variable for constraint system
-        import os
+        logger.info(f"🔧 solve_schedule_from_state called with job_id: {job_id}")
+        logger.info("🚀 Starting solve process...")
 
         if debug:
             os.environ["YUGA_DEBUG"] = "true"
+            # Reconfigure logging for debug mode
+            setup_logging("DEBUG")
+
         else:
             os.environ["YUGA_DEBUG"] = "false"
 
-        # Handle both old format (string) and new format (dict) for backward compatibility
-        if isinstance(state_data, str):
-            task_df_json = state_data
-            employee_count = None
-            days_in_schedule = None
-        elif isinstance(state_data, dict):
-            task_df_json = state_data.get("task_df_json")
-            employee_count = state_data.get("employee_count")
-            days_in_schedule = state_data.get("days_in_schedule")
-        else:
-            task_df_json = None
-            employee_count = None
-            days_in_schedule = None
+        # Extract parameters from state data dict
+        task_df_json = state_data.get("task_df_json")
+        employee_count = state_data.get("employee_count")
+        days_in_schedule = state_data.get("days_in_schedule")
 
         if not task_df_json:
-            logging.warning("❌ No task_df_json provided to solve_schedule_from_state")
+            logger.warning("❌ No task_df_json provided to solve_schedule_from_state")
+
             return (
                 gr.update(),
                 gr.update(),
@@ -90,15 +81,16 @@ class ScheduleService:
 
             # Debug: Log task information if debug is enabled
             if debug:
-                logging.info("🔍 DEBUG: Task information for constraint checking:")
+                logger.info("🔍 DEBUG: Task information for constraint checking:")
+
                 for task in tasks:
-                    logging.info(
+                    logger.info(
                         f"  Task ID: {task.id}, Project: '{task.project_id}', "
                         f"Sequence: {task.sequence_number}, Description: '{task.description[:30]}...'"
                     )
 
             # Generate schedule
-            schedule = ScheduleService._generate_schedule_for_solving(
+            schedule = ScheduleService.generate_schedule_for_solving(
                 tasks, employee_count, days_in_schedule
             )
 
@@ -108,13 +100,14 @@ class ScheduleService:
                 solved_task_df,
                 new_job_id,
                 status,
-            ) = await ScheduleService._solve_schedule(schedule, debug)
+            ) = await ScheduleService.solve_schedule(schedule, debug)
 
-            logging.info("📈 Solver process initiated successfully")
+            logger.info("📈 Solver process initiated successfully")
             return emp_df, solved_task_df, new_job_id, status, state_data
 
         except Exception as e:
-            logging.error(f"Error in solve_schedule_from_state: {e}")
+            logger.error(f"Error in solve_schedule_from_state: {e}")
+
             return (
                 gr.update(),
                 gr.update(),
@@ -124,7 +117,7 @@ class ScheduleService:
             )
 
     @staticmethod
-    def _generate_schedule_for_solving(
+    def generate_schedule_for_solving(
         tasks: list, employee_count: Optional[int], days_in_schedule: Optional[int]
     ) -> EmployeeSchedule:
         """Generate a complete schedule ready for solving"""
@@ -145,16 +138,38 @@ class ScheduleService:
                 random_seed=parameters.random_seed,
             )
 
-        logging.info("👥 Generating employees and availability...")
+        logger.info("👥 Generating employees and availability...")
         start_date = datetime.now().date()
-        randomizer = random.Random(parameters.random_seed)
-        employees = generate_employees(parameters, randomizer)
-        logging.info(f"✅ Generated {len(employees)} employees")
 
-        # Generate employee availability preferences
-        logging.info("📅 Generating employee availability preferences...")
-        generate_employee_availability(employees, parameters, start_date, randomizer)
-        logging.info("✅ Employee availability generated")
+        randomizer = random.Random(parameters.random_seed)
+
+        # Analyze tasks to determine what skills are actually needed
+        required_skills_needed = set()
+        for task in tasks:
+            if hasattr(task, "required_skill") and task.required_skill:
+                required_skills_needed.add(task.required_skill)
+
+        logger.info(f"🔍 Tasks require skills: {sorted(required_skills_needed)}")
+
+        # Generate employees with skills needed for the tasks
+        employees = generate_employees(parameters, randomizer, required_skills_needed)
+
+        # For single employee scenarios, set name and clear availability constraints
+        if parameters.employee_count == 1 and len(employees) == 1:
+            employees[0].name = "Chatbot User"
+            employees[0].unavailable_dates.clear()
+            employees[0].undesired_dates.clear()
+            employees[0].desired_dates.clear()
+
+        else:
+            # Generate employee availability preferences for multi-employee scenarios
+            logger.info("📅 Generating employee availability preferences...")
+            generate_employee_availability(
+                employees, parameters, start_date, randomizer
+            )
+            logger.info("✅ Employee availability generated")
+
+        logger.info(f"✅ Generated {len(employees)} employees")
 
         return EmployeeSchedule(
             employees=employees,
@@ -165,7 +180,7 @@ class ScheduleService:
         )
 
     @staticmethod
-    async def _solve_schedule(
+    async def solve_schedule(
         schedule: EmployeeSchedule, debug: bool = False
     ) -> Tuple[pd.DataFrame, pd.DataFrame, str, str]:
         """
@@ -185,7 +200,7 @@ class ScheduleService:
 
         # Start solving asynchronously
         def listener(solution):
-            app_state.add_solved_schedule(job_id, solution)
+            StateService.store_solved_schedule(job_id, solution)
 
         solver_manager.solve_and_listen(job_id, schedule, listener)
 
@@ -222,17 +237,18 @@ class ScheduleService:
         Returns:
             Tuple of (emp_df, task_df, job_id, status_message, schedule)
         """
-        if job_id and app_state.has_solved_schedule(job_id):
-            solved_schedule: EmployeeSchedule = app_state.get_solved_schedule(job_id)
+        if job_id and StateService.has_solved_schedule(job_id):
+            solved_schedule: EmployeeSchedule = StateService.get_solved_schedule(job_id)
 
             emp_df: pd.DataFrame = employees_to_dataframe(solved_schedule)
             task_df: pd.DataFrame = schedule_to_dataframe(solved_schedule)
 
             if debug:
                 # Log solved task order for debugging
-                logging.info("Solved task order:")
+                logger.info("Solved task order:")
+
                 for _, row in task_df.iterrows():
-                    logging.info(
+                    logger.info(
                         f"Project: {row['Project']}, Sequence: {row['Sequence']}, Task: {row['Task'][:30]}, Start: {row['Start']}"
                     )
 
@@ -250,7 +266,7 @@ class ScheduleService:
             ].sort_values(["Start"])
 
             # Check if hard constraints are violated (infeasible solution)
-            status_message = ScheduleService._generate_status_message(solved_schedule)
+            status_message = ScheduleService.generate_status_message(solved_schedule)
 
             return emp_df, task_df, job_id, status_message, solved_schedule
 
@@ -272,8 +288,8 @@ class ScheduleService:
             Tuple of (emp_df, task_df, job_id, status_message, llm_output)
         """
         try:
-            if job_id and app_state.has_solved_schedule(job_id):
-                schedule = app_state.get_solved_schedule(job_id)
+            if job_id and StateService.has_solved_schedule(job_id):
+                schedule = StateService.get_solved_schedule(job_id)
                 emp_df = employees_to_dataframe(schedule)
                 task_df = schedule_to_dataframe(schedule)
 
@@ -281,16 +297,16 @@ class ScheduleService:
                 task_df = task_df.sort_values("Start")
 
                 if debug:
-                    logging.info(f"Polling for job {job_id}")
-                    logging.info(f"Current schedule state: {task_df.head()}")
+                    logger.info(f"Polling for job {job_id}")
+                    logger.info(f"Current schedule state: {task_df.head()}")
 
                 # Generate status message based on constraint satisfaction
-                status_message = ScheduleService._generate_status_message(schedule)
+                status_message = ScheduleService.generate_status_message(schedule)
 
                 return emp_df, task_df, job_id, status_message, llm_output
 
         except Exception as e:
-            logging.error(f"Error polling: {e}")
+            logger.error(f"Error polling: {e}")
             return (
                 gr.update(),
                 gr.update(),
@@ -308,7 +324,7 @@ class ScheduleService:
         )
 
     @staticmethod
-    def _generate_status_message(schedule: EmployeeSchedule) -> str:
+    def generate_status_message(schedule: EmployeeSchedule) -> str:
         """Generate status message based on schedule score and constraint violations"""
         status_message = "Solution updated"
 
@@ -327,13 +343,14 @@ class ScheduleService:
                     f"⚠️ CONSTRAINTS VIOLATED: {violation_count} hard constraint(s) could not be satisfied. "
                     f"The schedule is not feasible.\n\n{violation_details}\n\nSuggestions:\n{suggestion_text}"
                 )
-                logging.warning(
+                logger.warning(
                     f"Infeasible solution detected. Hard score: {hard_score}"
                 )
+
             else:
                 soft_score = schedule.score.soft_score
                 status_message = f"✅ Solved successfully! Score: {hard_score}/{soft_score} (hard/soft)"
-                logging.info(
+                logger.info(
                     f"Feasible solution found. Score: {hard_score}/{soft_score}"
                 )
 

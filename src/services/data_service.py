@@ -1,7 +1,5 @@
 import os
 import uuid
-import logging
-from datetime import datetime
 from io import StringIO
 from typing import Dict, List, Tuple, Union, Optional, Any
 
@@ -23,6 +21,11 @@ from constraint_solvers.timetable.domain import (
 
 from helpers import schedule_to_dataframe, employees_to_dataframe
 from .mock_projects_service import MockProjectService
+from utils.logging_config import setup_logging, get_logger
+
+# Initialize logging
+setup_logging()
+logger = get_logger(__name__)
 
 
 class DataService:
@@ -52,24 +55,25 @@ class DataService:
             Tuple of (emp_df, task_df, job_id, status_message, state_data)
         """
         if project_source == "Upload Project Files":
-            files, project_source_info = DataService._process_uploaded_files(file_obj)
+            files, project_source_info = DataService.process_uploaded_files(file_obj)
+
         else:
-            files, project_source_info = DataService._process_mock_projects(
+            files, project_source_info = DataService.process_mock_projects(
                 mock_projects
             )
 
-        logging.info(f"🔄 Processing {len(files)} project(s)...")
+        logger.info(f"🔄 Processing {len(files)} project(s)...")
 
         combined_tasks: List[Task] = []
         combined_employees: Dict[str, Employee] = {}
 
         # Process each file/project
         for idx, single_file in enumerate(files):
-            project_id = DataService._derive_project_id(
+            project_id = DataService.derive_project_id(
                 project_source, single_file, mock_projects, idx
             )
 
-            logging.info(f"⚙️ Processing project {idx+1}/{len(files)}: '{project_id}'")
+            logger.info(f"⚙️ Processing project {idx+1}/{len(files)}: '{project_id}'")
 
             schedule_part: EmployeeSchedule = await generate_agent_data(
                 single_file,
@@ -77,7 +81,8 @@ class DataService:
                 employee_count=employee_count,
                 days_in_schedule=days_in_schedule,
             )
-            logging.info(f"✅ Completed processing project '{project_id}'")
+
+            logger.info(f"✅ Completed processing project '{project_id}'")
 
             # Merge employees (unique by name)
             for emp in schedule_part.employees:
@@ -87,17 +92,17 @@ class DataService:
             # Append tasks with project id already set
             combined_tasks.extend(schedule_part.tasks)
 
-        logging.info(
+        logger.info(
             f"👥 Merging data: {len(combined_employees)} unique employees, {len(combined_tasks)} total tasks"
         )
 
         # Build final schedule
-        final_schedule = DataService._build_final_schedule(
+        final_schedule = DataService.build_final_schedule(
             combined_employees, combined_tasks, employee_count, days_in_schedule
         )
 
         # Convert to DataFrames
-        emp_df, task_df = DataService._convert_to_dataframes(final_schedule, debug)
+        emp_df, task_df = DataService.convert_to_dataframes(final_schedule, debug)
 
         # Generate job ID and state data
         job_id = str(uuid.uuid4())
@@ -108,12 +113,12 @@ class DataService:
         }
 
         status_message = f"Data loaded successfully from {project_source_info}"
-        logging.info("🎉 Data loading completed successfully!")
+        logger.info("🎉 Data loading completed successfully!")
 
         return emp_df, task_df, job_id, status_message, state_data
 
     @staticmethod
-    def _process_uploaded_files(file_obj: Any) -> Tuple[List[Any], str]:
+    def process_uploaded_files(file_obj: Any) -> Tuple[List[Any], str]:
         """Process uploaded files and return file list and description"""
         if file_obj is None:
             raise ValueError("No file uploaded. Please upload a file.")
@@ -121,12 +126,12 @@ class DataService:
         # Support multiple files. Gradio returns a list when multiple files are selected.
         files = file_obj if isinstance(file_obj, list) else [file_obj]
         project_source_info = f"{len(files)} file(s)"
-        logging.info(f"📄 Found {len(files)} file(s) to process")
+        logger.info(f"📄 Found {len(files)} file(s) to process")
 
         return files, project_source_info
 
     @staticmethod
-    def _process_mock_projects(
+    def process_mock_projects(
         mock_projects: Union[str, List[str], None]
     ) -> Tuple[List[str], str]:
         """Process mock projects and return file contents and description"""
@@ -149,12 +154,12 @@ class DataService:
         project_source_info = (
             f"{len(mock_projects)} mock project(s): {', '.join(mock_projects)}"
         )
-        logging.info(f"📋 Selected mock projects: {', '.join(mock_projects)}")
+        logger.info(f"📋 Selected mock projects: {', '.join(mock_projects)}")
 
         return files, project_source_info
 
     @staticmethod
-    def _derive_project_id(
+    def derive_project_id(
         project_source: str,
         single_file: Any,
         mock_projects: Union[str, List[str], None],
@@ -164,16 +169,19 @@ class DataService:
         if project_source == "Upload Project Files":
             try:
                 return os.path.splitext(os.path.basename(single_file.name))[0]
+
             except AttributeError:
                 return f"project_{idx+1}"
+
         else:
             # For mock projects, use the mock project name as the project ID
             if isinstance(mock_projects, list):
                 return mock_projects[idx]
+
             return mock_projects or f"project_{idx+1}"
 
     @staticmethod
-    def _build_final_schedule(
+    def build_final_schedule(
         combined_employees: Dict[str, Employee],
         combined_tasks: List[Task],
         employee_count: Optional[int],
@@ -184,7 +192,7 @@ class DataService:
 
         # Override with custom parameters if provided
         if employee_count is not None or days_in_schedule is not None:
-            logging.info(
+            logger.info(
                 f"⚙️ Customizing parameters: {employee_count} employees, {days_in_schedule} days"
             )
             parameters = TimeTableDataParameters(
@@ -200,7 +208,8 @@ class DataService:
                 random_seed=parameters.random_seed,
             )
 
-        logging.info("🏗️ Building final schedule structure...")
+        logger.info("🏗️ Building final schedule structure...")
+
         return EmployeeSchedule(
             employees=list(combined_employees.values()),
             tasks=combined_tasks,
@@ -210,11 +219,11 @@ class DataService:
         )
 
     @staticmethod
-    def _convert_to_dataframes(
+    def convert_to_dataframes(
         schedule: EmployeeSchedule, debug: bool = False
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """Convert schedule to DataFrames for display"""
-        logging.info("📊 Converting to data tables...")
+        logger.info("📊 Converting to data tables...")
         emp_df: pd.DataFrame = employees_to_dataframe(schedule)
         task_df: pd.DataFrame = schedule_to_dataframe(schedule)
 
@@ -234,12 +243,12 @@ class DataService:
 
         if debug:
             # Log sequence numbers for debugging
-            logging.info("Task sequence numbers after load_data:")
+            logger.info("Task sequence numbers after load_data:")
             for _, row in task_df.iterrows():
-                logging.info(
+                logger.info(
                     f"Project: {row['Project']}, Sequence: {row['Sequence']}, Task: {row['Task']}"
                 )
-            logging.info("Task DataFrame being set in load_data: %s", task_df.head())
+            logger.info("Task DataFrame being set in load_data: %s", task_df.head())
 
         return emp_df, task_df
 
@@ -261,20 +270,22 @@ class DataService:
             raise ValueError("No task_df_json provided")
 
         try:
-            logging.info("📋 Parsing task data from JSON...")
+            logger.info("📋 Parsing task data from JSON...")
             task_df: pd.DataFrame = pd.read_json(StringIO(task_df_json), orient="split")
-            logging.info(f"📊 Found {len(task_df)} tasks to schedule")
+            logger.info(f"📊 Found {len(task_df)} tasks to schedule")
 
             if debug:
-                logging.info("Task sequence numbers from JSON:")
+                logger.info("Task sequence numbers from JSON:")
+
                 for _, row in task_df.iterrows():
-                    logging.info(
+                    logger.info(
                         f"Project: {row.get('Project', 'N/A')}, Sequence: {row.get('Sequence', 'N/A')}, Task: {row['Task']}"
                     )
 
             return task_df
+
         except Exception as e:
-            logging.error(f"❌ Error parsing task_df_json: {e}")
+            logger.error(f"❌ Error parsing task_df_json: {e}")
             raise ValueError(f"Error parsing task data: {str(e)}")
 
     @staticmethod
@@ -288,7 +299,7 @@ class DataService:
         Returns:
             List of Task objects
         """
-        logging.info("🆔 Generating task IDs and converting to solver format...")
+        logger.info("🆔 Generating task IDs and converting to solver format...")
         ids = (str(i) for i in range(len(task_df)))
 
         tasks = []
@@ -305,5 +316,5 @@ class DataService:
                 )
             )
 
-        logging.info(f"✅ Converted {len(tasks)} tasks for solver")
+        logger.info(f"✅ Converted {len(tasks)} tasks for solver")
         return tasks

@@ -1,4 +1,4 @@
-import os, asyncio, logging
+import os, asyncio
 from typing import Optional, List
 
 from llama_index.llms.nebius import NebiusLLM
@@ -19,9 +19,11 @@ from agents.task_processing import (
     log_task_duration_breakdown,
     log_total_time,
 )
+from utils.logging_config import setup_logging, get_logger
 
-logging.basicConfig(level=logging.INFO)
-logger: logging.Logger = logging.getLogger(__name__)
+# Initialize logging
+setup_logging()
+logger = get_logger(__name__)
 
 
 from domain import AgentsConfig, AGENTS_CONFIG

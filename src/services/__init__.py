@@ -8,10 +8,12 @@ from .logging_service import LoggingService
 from .schedule_service import ScheduleService
 from .data_service import DataService
 from .mock_projects_service import MockProjectService
+from .state_service import StateService
 
 __all__ = [
     "LoggingService",
     "ScheduleService",
     "DataService",
     "MockProjectService",
+    "StateService",
 ]

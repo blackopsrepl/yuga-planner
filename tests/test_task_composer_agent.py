@@ -1,6 +1,5 @@
 import pytest, logging
 
-
 from src.utils.load_secrets import load_secrets
 
 # Configure logging
@@ -10,7 +9,7 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_secrets("tests/secrets/creds.py")
 # Import task_composer_agent after environment variables are set
-from src.agents.task_composer_agent import TaskComposerAgent
+from src.factory.agents.task_composer_agent import TaskComposerAgent
 
 
 @pytest.mark.asyncio

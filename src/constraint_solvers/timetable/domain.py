@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 class Employee:
     name: Annotated[str, PlanningId]
     skills: Annotated[set[str], field(default_factory=set)]
+
     unavailable_dates: Annotated[set[date], field(default_factory=set)] = field(
         default_factory=set
     )
@@ -52,11 +53,15 @@ class Task:
     start_slot: Annotated[
         int, PlanningVariable(value_range_provider_refs=["startSlotRange"])
     ]  # Slot index when the task starts
+
     required_skill: str
+
     # Identifier for the project this task belongs to (set by the UI when loading multiple project files)
     project_id: str = ""
+
     # Sequence number within the project to maintain original task order
     sequence_number: int = 0
+
     # Whether this task is pinned to its current assignment (for calendar events)
     pinned: Annotated[bool, PlanningPin] = False
     employee: Annotated[

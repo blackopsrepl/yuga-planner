@@ -1,8 +1,6 @@
 import pytest
-from datetime import datetime, timedelta
+
 from src.utils.load_secrets import load_secrets
-from dateutil.rrule import rrulestr
-from icalendar import Calendar, vDDDTypes
 
 # Load environment variables for agent (if needed)
 load_secrets("tests/secrets/creds.py")

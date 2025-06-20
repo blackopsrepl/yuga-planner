@@ -11,8 +11,8 @@ from constraint_solvers.timetable.solver import solver_manager
 from factory.data.provider import (
     DATA_PARAMS,
     TimeTableDataParameters,
-    SLOTS_PER_DAY,
 )
+from constraint_solvers.timetable.working_hours import SLOTS_PER_WORKING_DAY
 
 from factory.data.generators import (
     generate_employees,
@@ -181,7 +181,7 @@ class ScheduleService:
             employees=employees,
             tasks=tasks,
             schedule_info=ScheduleInfo(
-                total_slots=parameters.days_in_schedule * SLOTS_PER_DAY
+                total_slots=parameters.days_in_schedule * SLOTS_PER_WORKING_DAY
             ),
         )
 

@@ -2,6 +2,46 @@ from datetime import datetime, timedelta, date
 import pandas as pd
 
 from factory.data.generators import earliest_monday_on_or_after
+from constraint_solvers.timetable.working_hours import (
+    SLOTS_PER_WORKING_DAY,
+    MORNING_SLOTS,
+)
+
+
+def slot_to_datetime(slot: int, base_date: date = None) -> datetime:
+    """Convert a slot index to actual datetime, respecting working hours.
+
+    Args:
+        slot (int): The slot index (0-based).
+        base_date (date, optional): Base date to start from. Defaults to today.
+
+    Returns:
+        datetime: The actual datetime for this slot.
+    """
+    if base_date is None:
+        base_date = date.today()
+
+    # Calculate which working day this slot falls on
+    working_day = slot // SLOTS_PER_WORKING_DAY
+    slot_within_day = slot % SLOTS_PER_WORKING_DAY
+
+    # Calculate the actual calendar date
+    actual_date = base_date + timedelta(days=working_day)
+
+    # Convert slot within day to actual time
+    if slot_within_day < MORNING_SLOTS:
+        # Morning session: 9:00-13:00 (slots 0-7)
+        hour = 9 + (slot_within_day // 2)
+        minute = (slot_within_day % 2) * 30
+    else:
+        # Afternoon session: 14:00-18:00 (slots 8-15)
+        afternoon_slot = slot_within_day - MORNING_SLOTS
+        hour = 14 + (afternoon_slot // 2)
+        minute = (afternoon_slot % 2) * 30
+
+    return datetime.combine(
+        actual_date, datetime.min.time().replace(hour=hour, minute=minute)
+    )
 
 
 def schedule_to_dataframe(schedule) -> pd.DataFrame:
@@ -21,14 +61,9 @@ def schedule_to_dataframe(schedule) -> pd.DataFrame:
         # Get employee name or "Unassigned" if no employee assigned
         employee: str = task.employee.name if task.employee else "Unassigned"
 
-        # Calculate start and end times based on 30-minute slots
-        # Schedule starts from next Monday at 8 AM
-        base_date = earliest_monday_on_or_after(date.today())
-        base_datetime = datetime.combine(
-            base_date, datetime.min.time().replace(hour=8)
-        )  # Start at 8 AM Monday
-        start_time: datetime = base_datetime + timedelta(minutes=30 * task.start_slot)
-        end_time: datetime = start_time + timedelta(minutes=30 * task.duration_slots)
+        # Calculate start and end times using working hours
+        start_time: datetime = slot_to_datetime(task.start_slot)
+        end_time: datetime = slot_to_datetime(task.start_slot + task.duration_slots)
 
         # Add task data to list with availability flags
         data.append(

@@ -9,8 +9,8 @@ from factory.data.provider import (
     generate_agent_data,
     DATA_PARAMS,
     TimeTableDataParameters,
-    SLOTS_PER_DAY,
 )
+from constraint_solvers.timetable.working_hours import SLOTS_PER_WORKING_DAY
 
 from constraint_solvers.timetable.domain import (
     EmployeeSchedule,
@@ -214,7 +214,7 @@ class DataService:
             employees=list(combined_employees.values()),
             tasks=combined_tasks,
             schedule_info=ScheduleInfo(
-                total_slots=parameters.days_in_schedule * SLOTS_PER_DAY
+                total_slots=parameters.days_in_schedule * SLOTS_PER_WORKING_DAY
             ),
         )
 

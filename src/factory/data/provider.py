@@ -24,8 +24,8 @@ logger = get_logger(__name__)
 #        CONSTANTS
 # =========================
 
-# Each slot is 30 minutes - 20 slots = 10 hours working day
-SLOTS_PER_DAY = 20
+# Import working hours configuration
+from constraint_solvers.timetable.working_hours import SLOTS_PER_WORKING_DAY
 
 
 # =========================
@@ -100,7 +100,7 @@ async def generate_agent_data(
     start_date: date = earliest_monday_on_or_after(date.today())
     randomizer: Random = Random(parameters.random_seed)
     employees: list[Employee] = generate_employees(parameters, randomizer)
-    total_slots: int = parameters.days_in_schedule * SLOTS_PER_DAY
+    total_slots: int = parameters.days_in_schedule * SLOTS_PER_WORKING_DAY
 
     logger.debug("Processing file object: %s (type: %s)", file, type(file))
 
@@ -157,7 +157,7 @@ async def generate_mcp_data(
 
     start_date: date = earliest_monday_on_or_after(date.today())
     randomizer: Random = Random(parameters.random_seed)
-    total_slots: int = parameters.days_in_schedule * SLOTS_PER_DAY
+    total_slots: int = parameters.days_in_schedule * SLOTS_PER_WORKING_DAY
 
     # --- CALENDAR TASKS ---
     calendar_tasks = generate_tasks_from_calendar(

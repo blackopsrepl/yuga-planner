@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [0.5.4](///compare/v0.5.3...v0.5.4) (2025-06-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* add task pinning system and refactor existing systems
+
+### Features
+
+* add task pinning system and refactor existing systems e3a1efe
+
 ## [0.5.3](///compare/v0.5.2...v0.5.3) (2025-06-20)
 
 

@@ -30,18 +30,12 @@ def extract_ical_entries(file_bytes):
                     return str(val)
 
                 def to_datetime(val):
-                    """Convert icalendar datetime to Python datetime object, normalized to current timezone."""
+                    """Convert icalendar datetime to Python datetime object, keeping original timezone."""
                     if hasattr(val, "dt"):
                         dt = val.dt
                         if isinstance(dt, datetime):
-                            # If timezone-aware, convert to current timezone, then make naive
-                            if dt.tzinfo is not None:
-                                # Convert to local timezone then strip timezone info
-                                local_dt = dt.astimezone()
-                                return local_dt.replace(tzinfo=None)
-                            else:
-                                # Already naive, return as-is
-                                return dt
+                            # Keep timezone-aware datetimes as-is, or return naive ones unchanged
+                            return dt
                         elif isinstance(dt, date):
                             # Convert date to datetime at 9 AM (naive)
                             return datetime.combine(
@@ -49,7 +43,7 @@ def extract_ical_entries(file_bytes):
                             )
                     return None
 
-                # Parse datetime objects for slot calculation (now normalized to current timezone)
+                # Parse datetime objects for slot calculation (keeping original timezone)
                 start_datetime = to_datetime(dtstart)
                 end_datetime = to_datetime(dtend)
 
@@ -103,6 +97,8 @@ def validate_calendar_working_hours(
     """
     Validate that all calendar entries fall within standard working hours (9:00-18:00) and don't span lunch break (13:00-14:00).
 
+    Each event is validated in its original timezone context.
+
     Args:
         calendar_entries: List of calendar entry dictionaries
 
@@ -120,20 +116,26 @@ def validate_calendar_working_hours(
         end_datetime = entry.get("end_datetime")
 
         if start_datetime and isinstance(start_datetime, datetime):
-            if start_datetime.hour < 9:
+            # Use the hour in the event's original timezone
+            event_start_hour = start_datetime.hour
+            event_start_minute = start_datetime.minute
+
+            if event_start_hour < 9:
                 violations.append(
-                    f"'{summary}' starts at {start_datetime.hour:02d}:{start_datetime.minute:02d} (before 9:00)"
+                    f"'{summary}' starts at {event_start_hour:02d}:{event_start_minute:02d} (before 9:00)"
                 )
 
         if end_datetime and isinstance(end_datetime, datetime):
-            if end_datetime.hour > 18 or (
-                end_datetime.hour == 18 and end_datetime.minute > 0
-            ):
+            # Use the hour in the event's original timezone
+            event_end_hour = end_datetime.hour
+            event_end_minute = end_datetime.minute
+
+            if event_end_hour > 18 or (event_end_hour == 18 and event_end_minute > 0):
                 violations.append(
-                    f"'{summary}' ends at {end_datetime.hour:02d}:{end_datetime.minute:02d} (after 18:00)"
+                    f"'{summary}' ends at {event_end_hour:02d}:{event_end_minute:02d} (after 18:00)"
                 )
 
-        # Check for lunch break spanning (13:00-14:00)
+        # Check for lunch break spanning (13:00-14:00) in original timezone
         if (
             start_datetime
             and end_datetime
@@ -163,12 +165,17 @@ def datetime_to_slot(dt: datetime, base_date: date) -> int:
     Convert a datetime to a 30-minute slot index within working days.
 
     Args:
-        dt: The datetime to convert (should be naive local time)
-        base_date: The base date (slot 0 = base_date at 9:00 AM local time)
+        dt: The datetime to convert (timezone-aware or naive)
+        base_date: The base date (slot 0 = base_date at 9:00 AM)
 
     Returns:
         The slot index (each slot = 30 minutes within working hours)
     """
+    # Convert timezone-aware datetime to naive for slot calculation
+    if dt.tzinfo is not None:
+        # Convert to local system timezone, then make naive
+        dt = dt.astimezone().replace(tzinfo=None)
+
     # Calculate which working day this datetime falls on
     days_from_base = (dt.date() - base_date).days
 
@@ -187,16 +194,22 @@ def datetime_to_slot(dt: datetime, base_date: date) -> int:
 
 def calculate_duration_slots(start_dt: datetime, end_dt: datetime) -> int:
     """
-    Calculate duration in 30-minute slots between two datetimes (naive local time).
+    Calculate duration in 30-minute slots between two datetimes.
 
     Args:
-        start_dt: Start datetime (naive local time)
-        end_dt: End datetime (naive local time)
+        start_dt: Start datetime (timezone-aware or naive)
+        end_dt: End datetime (timezone-aware or naive)
 
     Returns:
         Duration in 30-minute slots (minimum 1 slot)
     """
-    # Calculate difference in minutes (both should be naive local time)
+    # Convert timezone-aware datetimes to naive for calculation
+    if start_dt.tzinfo is not None:
+        start_dt = start_dt.astimezone().replace(tzinfo=None)
+    if end_dt.tzinfo is not None:
+        end_dt = end_dt.astimezone().replace(tzinfo=None)
+
+    # Calculate difference in minutes
     time_diff = end_dt - start_dt
     total_minutes = time_diff.total_seconds() / 60
 

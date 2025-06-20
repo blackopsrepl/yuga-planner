@@ -175,18 +175,23 @@ Currently, the **Gradio web demo** and **MCP personal tool** operate as separate
    cd yuga-planner
    ```
 
-2. **Install dependencies:**
+2. **Create a virtual environment:**
+   ```bash
+   make venv
+   ```
+
+3. **Install dependencies:**
    ```bash
    make install
    ```
 
-3. **Set up environment variables / secrets:**
+4. **Set up environment variables / secrets:**
    ```bash
    make setup-secrets
    # Then edit tests/secrets/cred.py to add your API credentials
    ```
 
-4. **Run the app:**
+5. **Run the app:**
    ```bash
    make run
    ```

@@ -42,15 +42,18 @@ setup_logging()
 logger = get_logger(__name__)
 
 
-async def process_message_and_attached_file(file_path: str, message_body: str) -> dict:
+async def process_message_and_attached_file(
+    file_content: bytes, message_body: str, file_name: str = "calendar.ics"
+) -> dict:
     """
     MCP API endpoint for processing calendar files and task descriptions.
 
     This is a separate workflow from the main Gradio UI and handles external API requests.
 
     Args:
-        file_path (str): Path to the attached file (typically .ics calendar file)
+        file_content (bytes): The actual file content bytes (typically .ics calendar file)
         message_body (str): The body of the last chat message, which contains the task description
+        file_name (str): Optional filename for logging purposes
     Returns:
         dict: Contains confirmation, file info, calendar entries, error, and solved schedule info
     """
@@ -59,7 +62,10 @@ async def process_message_and_attached_file(file_path: str, message_body: str) -
     debug_mode = is_debug_enabled()
 
     logger.info("MCP Handler: Processing message with attached file")
-    logger.debug("File path: %s", file_path)
+    logger.debug("File name: %s", file_name)
+    logger.debug(
+        "File content size: %d bytes", len(file_content) if file_content else 0
+    )
     logger.debug("Message: %s", message_body)
     logger.debug("Debug mode: %s", debug_mode)
 
@@ -67,25 +73,33 @@ async def process_message_and_attached_file(file_path: str, message_body: str) -
     start_time = time.time()
 
     try:
-        # Step 1: Extract calendar entries from the attached file
+        # Step 1: Extract calendar entries from the file content
         logger.info("Step 1: Extracting calendar entries...")
 
-        with open(file_path, "rb") as f:
-            file_bytes = f.read()
+        if not file_content:
+            logger.error("No file content provided")
+            return {
+                "error": "No file content provided",
+                "status": "no_file_content",
+                "timestamp": time.time(),
+                "processing_time_seconds": time.time() - start_time,
+            }
 
-        calendar_entries, error = extract_ical_entries(file_bytes)
+        calendar_entries, error = extract_ical_entries(file_content)
 
         if error:
             logger.error("Failed to extract calendar entries: %s", error)
             return {
                 "error": f"Failed to extract calendar entries: {error}",
-                "status": "failed",
+                "status": "calendar_parse_failed",
                 "timestamp": time.time(),
                 "processing_time_seconds": time.time() - start_time,
             }
 
         logger.info("Extracted %d calendar entries", len(calendar_entries))
-        if debug_mode:
+
+        # Log the calendar entries for debugging
+        if debug_mode and calendar_entries:
             logger.debug(
                 "Calendar entries details: %s",
                 [e.get("summary", "No summary") for e in calendar_entries[:5]],
@@ -167,7 +181,8 @@ async def process_message_and_attached_file(file_path: str, message_body: str) -
                             "status": "success",
                             "message": "Schedule solved successfully",
                             "file_info": {
-                                "path": file_path,
+                                "name": file_name,
+                                "size_bytes": len(file_content),
                                 "calendar_entries_count": len(calendar_entries),
                             },
                             "calendar_entries": calendar_entries,
@@ -219,7 +234,8 @@ async def process_message_and_attached_file(file_path: str, message_body: str) -
             "status": "timeout",
             "message": "Schedule solving timed out after maximum polls",
             "file_info": {
-                "path": file_path,
+                "name": file_name,
+                "size_bytes": len(file_content),
                 "calendar_entries_count": len(calendar_entries),
             },
             "calendar_entries": calendar_entries,
@@ -239,7 +255,7 @@ async def process_message_and_attached_file(file_path: str, message_body: str) -
         return {
             "error": str(e),
             "status": "failed",
-            "file_path": file_path,
+            "file_name": file_name,
             "message_body": message_body,
             "processing_time_seconds": processing_time,
             "timestamp": time.time(),

@@ -77,7 +77,7 @@ def _draw_info_page(debug: bool = False):
             try:
                 return gr.get_state().server_url + "/gradio_api/mcp/sse"
             except:
-                return "http://localhost:7860/gradio_api/mcp/sse"
+                return "https://blackopsrepl-yuga-planner.hf.space/gradio_api/mcp/sse"
 
         gr.Textbox(
             value=get_server_url(),

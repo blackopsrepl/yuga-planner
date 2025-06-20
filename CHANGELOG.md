@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [0.5.3](///compare/v0.5.2...v0.5.3) (2025-06-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* add working hours and weekend constraints
+
+### Features
+
+* add working hours and weekend constraints e466dd5
+
 ## [0.5.2](///compare/v0.5.1...v0.5.2) (2025-06-19)
 
 

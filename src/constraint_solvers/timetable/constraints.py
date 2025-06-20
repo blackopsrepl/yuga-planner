@@ -6,6 +6,8 @@ from .working_hours import (
     get_working_day_from_slot,
     get_slot_within_day,
     task_spans_lunch_break,
+    is_weekend_slot,
+    get_slot_date,
 )
 
 from timefold.solver.score import HardSoftDecimalScore
@@ -32,37 +34,7 @@ def get_slot_overlap(task1: Task, task2: Task) -> int:
     return max(0, overlap_end - overlap_start)
 
 
-def get_slot_date(slot: int) -> date:
-    """Convert a slot index to a date.
-
-    For compatibility with tests, slot 0 = today, slot 16 = tomorrow, etc.
-    In production, weekends would be filtered out, but for tests we keep simple mapping.
-
-    Args:
-        slot (int): The slot index.
-
-    Returns:
-        date: The date corresponding to the slot.
-    """
-    working_day = get_working_day_from_slot(slot)
-    today = date.today()
-    return today + timedelta(days=working_day)
-
-
-def is_weekend_slot(slot: int) -> bool:
-    """Check if a slot falls on a weekend.
-
-    Since our slot system only includes working days, this should always return False
-    for valid slots, but we keep it for validation purposes.
-
-    Args:
-        slot (int): The slot index.
-
-    Returns:
-        bool: True if the slot would fall on a weekend.
-    """
-    slot_date = get_slot_date(slot)
-    return slot_date.weekday() >= 5  # Saturday=5, Sunday=6
+# Note: get_slot_date and is_weekend_slot are now imported from working_hours
 
 
 def tasks_violate_sequence_order(task1: Task, task2: Task) -> bool:
@@ -183,9 +155,11 @@ def task_fits_in_schedule(constraint_factory: ConstraintFactory):
 def unavailable_employee(constraint_factory: ConstraintFactory):
     return (
         constraint_factory.for_each(Task)
+        .join(ScheduleInfo)
         .filter(
-            lambda task: task.employee is not None
-            and get_slot_date(task.start_slot) in task.employee.unavailable_dates
+            lambda task, schedule_info: task.employee is not None
+            and get_slot_date(task.start_slot, schedule_info.base_date)
+            in task.employee.unavailable_dates
         )
         .penalize(HardSoftDecimalScore.ONE_HARD)
         .as_constraint("Unavailable employee")
@@ -215,9 +189,11 @@ def no_weekend_scheduling(constraint_factory: ConstraintFactory):
 def undesired_day_for_employee(constraint_factory: ConstraintFactory):
     return (
         constraint_factory.for_each(Task)
+        .join(ScheduleInfo)
         .filter(
-            lambda task: task.employee is not None
-            and get_slot_date(task.start_slot) in task.employee.undesired_dates
+            lambda task, schedule_info: task.employee is not None
+            and get_slot_date(task.start_slot, schedule_info.base_date)
+            in task.employee.undesired_dates
         )
         .penalize(HardSoftDecimalScore.ONE_SOFT)
         .as_constraint("Undesired day for employee")
@@ -227,9 +203,11 @@ def undesired_day_for_employee(constraint_factory: ConstraintFactory):
 def desired_day_for_employee(constraint_factory: ConstraintFactory):
     return (
         constraint_factory.for_each(Task)
+        .join(ScheduleInfo)
         .filter(
-            lambda task: task.employee is not None
-            and get_slot_date(task.start_slot) in task.employee.desired_dates
+            lambda task, schedule_info: task.employee is not None
+            and get_slot_date(task.start_slot, schedule_info.base_date)
+            in task.employee.desired_dates
         )
         .reward(HardSoftDecimalScore.ONE_SOFT)
         .as_constraint("Desired day for employee")

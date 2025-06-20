@@ -82,8 +82,10 @@ Yuga Planner follows a **service-oriented architecture** with clear separation o
 | **Live Log Streaming** | Real-time solver progress and status updates in UI | ✅ |
 | **Configurable Parameters** | Adjustable employee count and schedule duration | ✅ |
 | **Mock Project Loading** | Pre-configured sample projects for quick testing | ✅ |
-| **Calendar Parsing** | Extracts tasks from uploaded calendar files (.ics) | ✅ |
-| **MCP Endpoint** | API endpoint for MCP tool integration | ✅ |
+| **Calendar Parsing & Pinning** | Extracts and preserves calendar events from .ics files at original times | ✅ |
+| **Business Hours Enforcement** | Respects 9:00-18:00 working hours with lunch break exclusion | ✅ |
+| **Weekend Scheduling Prevention** | Hard constraint preventing weekend task assignments | ✅ |
+| **MCP Endpoint** | API endpoint for MCP tool integration with calendar support | ✅ |
 
 ## 🎯 Two Usage Modes
 
@@ -123,9 +125,8 @@ available time slots around your existing meetings
 - Designed for seamless chatbot and agent workflow integration
 
 **Current Limitations:**
-- **Weekend constraints:** Tasks can be scheduled on weekends (should respect work-week boundaries)
-- **Working hours:** No enforcement of standard business hours (8 AM - 6 PM)
-- **Calendar pinning:** Tasks from uploaded calendars are solved alongside other tasks but should remain pinned to their original time slots
+- **Cross-system integration:** Gradio web demo and MCP personal tool operate as separate systems
+- **Multi-timezone support:** Currently operates in a single timezone context with UTC conversion for consistency. Calendar events from different timezones are normalized to the same scheduling context.
 
 See the [CHANGELOG.md](CHANGELOG.md) for details on recent MCP-related changes.
 
@@ -138,14 +139,10 @@ See the [CHANGELOG.md](CHANGELOG.md) for details on recent MCP-related changes.
 
 ### Work in Progress
 
-- **Constraint Enhancements:**
-  - Weekend respect (prevent scheduling on weekends)
-  - Working hours enforcement (8 AM - 6 PM business hours)
-  - Calendar task pinning (preserve original time slots for imported calendar events)
-- **Gradio UI overhaul:** Enhanced user experience and visual improvements
-- **Migration to Pydantic models:** Type-safe data validation and serialization
-- **Migrate from violation_analyzer to Timefold dedicated libraries**
-- **Include tests for all constraints using ConstraintVerifier**
+- **🔧 Gradio UI overhaul:** Enhanced user experience and visual improvements
+- **🔍 Migration to Pydantic models:** Type-safe data validation and serialization
+- **📚 Migrate from violation_analyzer to Timefold dedicated libraries**
+- **⚡ Enhanced timezone support:** Multi-timezone calendar integration for international scheduling
 
 ### Future Work
 

@@ -215,8 +215,8 @@ class TestConstraints:
         task = create_task(
             task_id="task1",
             description="Overlong Task",
-            duration_slots=10,  # Task extends to slot 64 (beyond 59)
-            start_slot=55,
+            duration_slots=10,  # Task extends to slot 65 (beyond 59)
+            start_slot=56,  # Start at slot 56, end at slot 65 (beyond schedule)
             required_skill="Python",
             employee=self.employee_alice,
         )
@@ -245,11 +245,11 @@ class TestConstraints:
 
     def test_unavailable_employee_constraint_violation(self):
         """Test that tasks assigned to unavailable employees are penalized."""
-        # Assuming 16 slots per working day, tomorrow starts at slot 16
+        # With 20 slots per working day, tomorrow starts at slot 20
         task = create_task(
             task_id="task1",
             description="Task on unavailable day",
-            start_slot=16,  # Tomorrow (when Alice is unavailable)
+            start_slot=20,  # Tomorrow (when Alice is unavailable)
             required_skill="Python",
             employee=self.employee_alice,
         )
@@ -261,11 +261,11 @@ class TestConstraints:
         )
 
     def test_unavailable_employee_constraint_satisfied(self):
-        """Test that tasks assigned on available days are not penalized."""
+        """Test that tasks not on unavailable days are not penalized."""
         task = create_task(
             task_id="task1",
             description="Task on available day",
-            start_slot=0,  # Today (when Alice is available)
+            start_slot=0,  # Today (Alice is available)
             required_skill="Python",
             employee=self.employee_alice,
         )
@@ -371,8 +371,8 @@ class TestConstraints:
         task = create_task(
             task_id="task1",
             description="Task spanning lunch",
-            start_slot=6,  # Starts in morning (slot 6)
-            duration_slots=4,  # Ends in afternoon (slot 10), spans lunch
+            start_slot=7,  # Starts at 12:30 (slot 7), spans lunch break
+            duration_slots=4,  # 2 hours, ends at 14:30 (slot 11)
             required_skill="Python",
             employee=self.employee_alice,
         )
@@ -383,30 +383,13 @@ class TestConstraints:
             .penalizes_by(1)
         )
 
-    def test_no_lunch_break_spanning_constraint_satisfied_morning(self):
-        """Test that tasks contained in morning session are not penalized."""
+    def test_no_lunch_break_spanning_constraint_satisfied(self):
+        """Test that tasks not spanning lunch break are not penalized."""
         task = create_task(
             task_id="task1",
-            description="Morning task",
-            start_slot=2,  # Morning session
-            duration_slots=4,  # Stays in morning (slots 2-5)
-            required_skill="Python",
-            employee=self.employee_alice,
-        )
-
-        (
-            self.constraint_verifier.verify_that(no_lunch_break_spanning)
-            .given(task, self.employee_alice, self.schedule_info)
-            .penalizes_by(0)
-        )
-
-    def test_no_lunch_break_spanning_constraint_satisfied_afternoon(self):
-        """Test that tasks contained in afternoon session are not penalized."""
-        task = create_task(
-            task_id="task1",
-            description="Afternoon task",
-            start_slot=10,  # Afternoon session (slot 10 = 3rd hour of afternoon)
-            duration_slots=4,  # Stays in afternoon (slots 10-13)
+            description="Task before lunch",
+            start_slot=0,  # Starts at 9:00
+            duration_slots=4,  # 2 hours, ends at 11:00
             required_skill="Python",
             employee=self.employee_alice,
         )
@@ -441,11 +424,11 @@ class TestConstraints:
 
     def test_undesired_day_for_employee_constraint_violation(self):
         """Test that tasks on undesired days incur soft penalty."""
-        # Assuming 16 slots per working day, day after tomorrow starts at slot 32
+        # With 20 slots per working day, day after tomorrow starts at slot 40
         task = create_task(
             task_id="task1",
             description="Task on undesired day",
-            start_slot=32,  # Day after tomorrow (Alice's undesired date)
+            start_slot=40,  # Day after tomorrow (Alice's undesired date)
             required_skill="Python",
             employee=self.employee_alice,
         )
@@ -457,11 +440,11 @@ class TestConstraints:
         )
 
     def test_undesired_day_for_employee_constraint_satisfied(self):
-        """Test that tasks on neutral days don't incur undesired day penalty."""
+        """Test that tasks not on undesired days are not penalized."""
         task = create_task(
             task_id="task1",
             description="Task on neutral day",
-            start_slot=0,  # Today (neutral for Alice, though it's also desired)
+            start_slot=0,  # Today (neutral for Alice)
             required_skill="Python",
             employee=self.employee_alice,
         )
@@ -473,7 +456,8 @@ class TestConstraints:
         )
 
     def test_desired_day_for_employee_constraint_reward(self):
-        """Test that tasks on desired days provide soft reward."""
+        """Test that tasks on desired days provide reward."""
+        # Alice's desired day is today (slot 0-19)
         task = create_task(
             task_id="task1",
             description="Task on desired day",
@@ -493,7 +477,7 @@ class TestConstraints:
         task = create_task(
             task_id="task1",
             description="Task on neutral day",
-            start_slot=16,  # Tomorrow (neutral for Alice)
+            start_slot=20,  # Tomorrow (neutral for Alice)
             required_skill="Python",
             employee=self.employee_alice,
         )
@@ -606,7 +590,7 @@ class TestConstraints:
             create_task(
                 "task2",
                 "Valid Java Task",
-                start_slot=8,  # Afternoon session, non-overlapping
+                start_slot=10,  # After lunch break (14:00), non-overlapping
                 required_skill="Java",
                 project_id="project1",
                 sequence_number=2,
@@ -615,7 +599,7 @@ class TestConstraints:
             create_task(
                 "task3",
                 "Bob's Valid Task",
-                start_slot=12,
+                start_slot=14,  # After lunch break (14:00)
                 required_skill="Java",
                 project_id="project2",
                 sequence_number=1,
@@ -675,7 +659,7 @@ class TestConstraints:
                 self.employee_bob,
                 self.schedule_info,
             )
-            .scores(HardSoftDecimalScore.of(Decimal("-5"), Decimal("-0.12132")))
+            .scores(HardSoftDecimalScore.of(Decimal("-4"), Decimal("-0.12132")))
         )
 
 
@@ -728,11 +712,11 @@ def create_task(
     )
 
 
-def create_schedule_info(total_slots=48):
+def create_schedule_info(total_slots=60):
     """Create a schedule info object with specified total slots.
-    Default is 48 slots = 3 working days * 16 slots per working day.
+    Default is 60 slots = 3 working days * 20 slots per working day.
     """
-    return ScheduleInfo(total_slots=total_slots)
+    return ScheduleInfo(total_slots=total_slots, base_date=date.today())
 
 
 def create_standard_employees(dates):

@@ -15,6 +15,11 @@ from factory.agents.task_composer_agent import TaskComposerAgent
 from constraint_solvers.timetable.domain import *
 
 from utils.logging_config import setup_logging, get_logger
+from utils.extract_calendar import (
+    get_earliest_calendar_date,
+    datetime_to_slot,
+    validate_calendar_working_hours,
+)
 
 # Initialize logging
 setup_logging()
@@ -141,12 +146,65 @@ async def generate_mcp_data(
     days_in_schedule: int = None,
 ):
     parameters = MCP_PARAMS
-    if employee_count is not None or days_in_schedule is not None:
+
+    # --- DETERMINE START DATE AND REQUIRED SCHEDULE LENGTH FROM CALENDAR ---
+
+    # Validate calendar entries are within working hours first
+    if calendar_entries:
+        is_valid, error_msg = validate_calendar_working_hours(calendar_entries)
+        if not is_valid:
+            logger.error(f"❌ Calendar validation failed: {error_msg}")
+            raise ValueError(
+                f"Calendar entries violate working hours constraints:\n{error_msg}"
+            )
+        else:
+            logger.info(
+                f"✅ All {len(calendar_entries)} calendar entries are within working hours (8:00-18:00)"
+            )
+
+    # Use earliest calendar date as the base, or fall back to next Monday if no calendar
+    earliest_calendar_date = (
+        get_earliest_calendar_date(calendar_entries) if calendar_entries else None
+    )
+
+    if earliest_calendar_date:
+        start_date: date = earliest_calendar_date
+
+        # Calculate required schedule length to accommodate all calendar entries
+        if calendar_entries and days_in_schedule is None:
+            # Find the latest calendar date to determine required schedule length
+            latest_date = earliest_calendar_date
+            for entry in calendar_entries:
+                end_dt = entry.get("end_datetime")
+                if end_dt and end_dt.date() > latest_date:
+                    latest_date = end_dt.date()
+
+            # Calculate days needed plus buffer for LLM tasks
+            calendar_days_span = (latest_date - earliest_calendar_date).days + 1
+            min_required_days = (
+                calendar_days_span + 30
+            )  # Add 30 days buffer for LLM tasks
+
+            # Use the larger of user-specified or calculated requirement
+            calculated_days = max(min_required_days, parameters.days_in_schedule)
+            logger.info(
+                f"📊 Calendar span: {calendar_days_span} days, using {calculated_days} total schedule days"
+            )
+        else:
+            calculated_days = (
+                days_in_schedule if days_in_schedule else parameters.days_in_schedule
+            )
+    else:
+        start_date: date = earliest_monday_on_or_after(date.today())
+        calculated_days = (
+            days_in_schedule if days_in_schedule else parameters.days_in_schedule
+        )
+
+    # Update parameters with calculated values
+    if employee_count is not None or calculated_days != parameters.days_in_schedule:
         parameters = TimeTableDataParameters(
             skill_set=parameters.skill_set,
-            days_in_schedule=days_in_schedule
-            if days_in_schedule is not None
-            else parameters.days_in_schedule,
+            days_in_schedule=calculated_days,
             employee_count=employee_count
             if employee_count is not None
             else parameters.employee_count,
@@ -155,14 +213,25 @@ async def generate_mcp_data(
             random_seed=parameters.random_seed,
         )
 
-    start_date: date = earliest_monday_on_or_after(date.today())
     randomizer: Random = Random(parameters.random_seed)
     total_slots: int = parameters.days_in_schedule * SLOTS_PER_WORKING_DAY
 
     # --- CALENDAR TASKS ---
     calendar_tasks = generate_tasks_from_calendar(
-        parameters, randomizer, calendar_entries
+        parameters, randomizer, calendar_entries, base_date=start_date
     )
+
+    # Validate that all calendar tasks have valid slot assignments
+    for task in calendar_tasks:
+        if task.start_slot >= total_slots:
+            logger.error(
+                f"Calendar task '{task.description}' has slot {task.start_slot} >= {total_slots}"
+            )
+            raise ValueError(
+                f"Calendar task slot {task.start_slot} exceeds schedule length {total_slots}. "
+                f"Increase days_in_schedule or check calendar dates."
+            )
+
     # Assign project_id 'EXISTING' to all calendar tasks
     for t in calendar_tasks:
         t.sequence_number = 0  # will be overwritten later
@@ -257,7 +326,9 @@ async def generate_mcp_data(
     schedule = EmployeeSchedule(
         employees=employees,
         tasks=all_tasks,
-        schedule_info=ScheduleInfo(total_slots=total_slots),
+        schedule_info=ScheduleInfo(
+            total_slots=total_slots, base_date=start_date, base_timezone=None
+        ),
     )
 
     final_df = schedule_to_dataframe(schedule)

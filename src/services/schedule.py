@@ -1,5 +1,5 @@
 import os, uuid, random
-from datetime import datetime
+from datetime import datetime, date, timezone
 from typing import Tuple, Dict, Any, Optional
 
 import pandas as pd
@@ -82,8 +82,52 @@ class ScheduleService:
             # Parse task data
             task_df = DataService.parse_task_data_from_json(task_df_json, debug)
 
+            # Extract base_date from pinned tasks for consistent slot calculations
+            base_date = None
+            pinned_tasks = task_df[task_df.get("Pinned", False) == True]
+            if not pinned_tasks.empty:
+                # Try to determine base_date from earliest pinned task
+                earliest_date = None
+                for _, row in pinned_tasks.iterrows():
+                    start_time = row.get("Start")
+                    if start_time is not None:
+                        try:
+                            if isinstance(start_time, str):
+                                dt = datetime.fromisoformat(
+                                    start_time.replace("Z", "+00:00")
+                                )
+                            elif isinstance(start_time, pd.Timestamp):
+                                dt = start_time.to_pydatetime()
+                            elif isinstance(start_time, datetime):
+                                dt = start_time
+                            elif isinstance(start_time, (int, float)):
+                                # Handle Unix timestamp (milliseconds or seconds)
+                                if start_time > 1e10:
+                                    dt = datetime.fromtimestamp(
+                                        start_time / 1000, tz=timezone.utc
+                                    ).replace(tzinfo=None)
+                                else:
+                                    dt = datetime.fromtimestamp(
+                                        start_time, tz=timezone.utc
+                                    ).replace(tzinfo=None)
+                            else:
+                                logger.debug(
+                                    f"Unhandled start_time type for base_date: {type(start_time)} = {start_time}"
+                                )
+                                continue
+
+                            if earliest_date is None or dt.date() < earliest_date:
+                                earliest_date = dt.date()
+                        except Exception as e:
+                            logger.debug(f"Error parsing start_time for base_date: {e}")
+                            continue
+
+                if earliest_date:
+                    base_date = earliest_date
+                    logger.info(f"🗓️ Determined base_date for schedule: {base_date}")
+
             # Convert DataFrame to tasks
-            tasks = DataService.convert_dataframe_to_tasks(task_df)
+            tasks = DataService.convert_dataframe_to_tasks(task_df, base_date)
 
             # Debug: Log task information if debug is enabled
             if debug:
@@ -97,7 +141,7 @@ class ScheduleService:
 
             # Generate schedule
             schedule = ScheduleService.generate_schedule_for_solving(
-                tasks, employee_count, days_in_schedule
+                tasks, employee_count, days_in_schedule, base_date
             )
 
             # Start solving
@@ -106,7 +150,7 @@ class ScheduleService:
                 solved_task_df,
                 new_job_id,
                 status,
-            ) = await ScheduleService.solve_schedule(schedule, debug)
+            ) = ScheduleService.solve_schedule(schedule, debug)
 
             logger.info("📈 Solver process initiated successfully")
             return emp_df, solved_task_df, new_job_id, status, state_data
@@ -124,7 +168,10 @@ class ScheduleService:
 
     @staticmethod
     def generate_schedule_for_solving(
-        tasks: list, employee_count: Optional[int], days_in_schedule: Optional[int]
+        tasks: list,
+        employee_count: Optional[int],
+        days_in_schedule: Optional[int],
+        base_date: date = None,
     ) -> EmployeeSchedule:
         """Generate a complete schedule ready for solving"""
         parameters: TimeTableDataParameters = DATA_PARAMS
@@ -177,16 +224,45 @@ class ScheduleService:
 
         logger.info(f"✅ Generated {len(employees)} employees")
 
+        # Assign employees to all tasks (both pinned and non-pinned)
+        # For single employee scenarios, assign the single employee to all tasks
+        if parameters.employee_count == 1 and len(employees) == 1:
+            main_employee = employees[0]
+            for task in tasks:
+                task.employee = main_employee
+                logger.debug(
+                    f"Assigned {main_employee.name} to task: {task.description[:30]}..."
+                )
+        else:
+            # For multi-employee scenarios, assign employees based on skills and availability
+            # This is a simple assignment - the solver will optimize later
+            for task in tasks:
+                # Find an employee with the required skill
+                suitable_employees = [
+                    emp for emp in employees if task.required_skill in emp.skills
+                ]
+                if suitable_employees:
+                    task.employee = suitable_employees[0]  # Simple assignment
+                else:
+                    # Fallback: assign the first employee
+                    task.employee = employees[0]
+                    logger.warning(
+                        f"No employee found with skill '{task.required_skill}' for task '{task.description[:30]}...', assigned {employees[0].name}"
+                    )
+
+        logger.info(f"✅ Assigned employees to {len(tasks)} tasks")
+
         return EmployeeSchedule(
             employees=employees,
             tasks=tasks,
             schedule_info=ScheduleInfo(
-                total_slots=parameters.days_in_schedule * SLOTS_PER_WORKING_DAY
+                total_slots=parameters.days_in_schedule * SLOTS_PER_WORKING_DAY,
+                base_date=base_date,
             ),
         )
 
     @staticmethod
-    async def solve_schedule(
+    def solve_schedule(
         schedule: EmployeeSchedule, debug: bool = False
     ) -> Tuple[pd.DataFrame, pd.DataFrame, str, str]:
         """
@@ -223,6 +299,7 @@ class ScheduleService:
                 "End",
                 "Duration (hours)",
                 "Required Skill",
+                "Pinned",
             ]
         ].sort_values(["Project", "Sequence"])
 
@@ -268,6 +345,7 @@ class ScheduleService:
                     "End",
                     "Duration (hours)",
                     "Required Skill",
+                    "Pinned",
                 ]
             ].sort_values(["Start"])
 

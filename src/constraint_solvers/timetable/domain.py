@@ -2,7 +2,7 @@ from timefold.solver import SolverStatus
 from timefold.solver.domain import *
 from timefold.solver.score import HardSoftDecimalScore
 
-from datetime import date
+from datetime import date, timezone
 from typing import Annotated
 from dataclasses import dataclass, field
 
@@ -99,13 +99,35 @@ class Task:
 @dataclass
 class ScheduleInfo:
     total_slots: int  # Total number of 30-minute slots in the schedule
+    base_date: date = None  # Base date for slot 0 (optional, defaults to today)
+    base_timezone: timezone = None  # Timezone for datetime conversions (optional)
 
     def to_dict(self):
-        return {"total_slots": self.total_slots}
+        return {
+            "total_slots": self.total_slots,
+            "base_date": self.base_date.isoformat() if self.base_date else None,
+            "base_timezone": str(self.base_timezone) if self.base_timezone else None,
+        }
 
     @staticmethod
     def from_dict(d):
-        return ScheduleInfo(total_slots=d["total_slots"])
+        base_date = None
+        if d.get("base_date"):
+            base_date = date.fromisoformat(d["base_date"])
+
+        base_timezone = None
+        if d.get("base_timezone"):
+            # Simple timezone parsing - extend as needed
+            tz_str = d["base_timezone"]
+            if tz_str == "UTC" or "+00:00" in tz_str:
+                base_timezone = timezone.utc
+            # Add more timezone parsing as needed
+
+        return ScheduleInfo(
+            total_slots=d["total_slots"],
+            base_date=base_date,
+            base_timezone=base_timezone,
+        )
 
 
 @planning_solution
@@ -124,8 +146,17 @@ class EmployeeSchedule:
     def get_start_slot_range(
         self,
     ) -> Annotated[list[int], ValueRangeProvider(id="startSlotRange")]:
-        """Returns all possible start slots."""
-        return list(range(self.schedule_info.total_slots))
+        """Returns all possible start slots, including slots used by pinned tasks."""
+        max_slot = self.schedule_info.total_slots
+
+        # Ensure all pinned task slots are included in the range
+        for task in self.tasks:
+            if getattr(task, "pinned", False):
+                task_end_slot = task.start_slot + task.duration_slots
+                if task_end_slot > max_slot:
+                    max_slot = task_end_slot
+
+        return list(range(max_slot))
 
     def to_dict(self):
         return {

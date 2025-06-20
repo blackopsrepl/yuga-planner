@@ -2,6 +2,7 @@ import os
 import uuid
 from io import StringIO
 from typing import Dict, List, Tuple, Union, Optional, Any
+from datetime import datetime, date, timezone
 
 import pandas as pd
 
@@ -22,6 +23,7 @@ from constraint_solvers.timetable.domain import (
 from factory.data.formatters import schedule_to_dataframe, employees_to_dataframe
 from .mock_projects import MockProjectService
 from utils.logging_config import setup_logging, get_logger
+from utils.extract_calendar import datetime_to_slot, get_earliest_calendar_date
 
 # Initialize logging
 setup_logging()
@@ -214,7 +216,8 @@ class DataService:
             employees=list(combined_employees.values()),
             tasks=combined_tasks,
             schedule_info=ScheduleInfo(
-                total_slots=parameters.days_in_schedule * SLOTS_PER_WORKING_DAY
+                total_slots=parameters.days_in_schedule * SLOTS_PER_WORKING_DAY,
+                base_date=None,  # Use default base_date for regular data loading
             ),
         )
 
@@ -238,6 +241,7 @@ class DataService:
                 "End",
                 "Duration (hours)",
                 "Required Skill",
+                "Pinned",
             ]
         ].sort_values(["Project", "Sequence"])
 
@@ -289,12 +293,15 @@ class DataService:
             raise ValueError(f"Error parsing task data: {str(e)}")
 
     @staticmethod
-    def convert_dataframe_to_tasks(task_df: pd.DataFrame) -> List[Task]:
+    def convert_dataframe_to_tasks(
+        task_df: pd.DataFrame, base_date: date = None
+    ) -> List[Task]:
         """
         Convert a DataFrame to a list of Task objects.
 
         Args:
             task_df: DataFrame containing task data
+            base_date: Base date for slot calculations (for pinned tasks)
 
         Returns:
             List of Task objects
@@ -302,19 +309,131 @@ class DataService:
         logger.info("🆔 Generating task IDs and converting to solver format...")
         ids = (str(i) for i in range(len(task_df)))
 
+        # Determine base_date if not provided
+        if base_date is None:
+            # Try to get from pinned tasks' dates
+            pinned_tasks = task_df[task_df.get("Pinned", False) == True]
+            if not pinned_tasks.empty:
+                earliest_date = None
+                for _, row in pinned_tasks.iterrows():
+                    start_time = row.get("Start")
+                    if start_time is not None:
+                        try:
+                            if isinstance(start_time, str):
+                                dt = datetime.fromisoformat(
+                                    start_time.replace("Z", "+00:00")
+                                )
+                            elif isinstance(start_time, pd.Timestamp):
+                                dt = start_time.to_pydatetime()
+                            elif isinstance(start_time, datetime):
+                                dt = start_time
+                            elif isinstance(start_time, (int, float)):
+                                # Handle Unix timestamp (milliseconds or seconds)
+                                if start_time > 1e10:
+                                    dt = datetime.fromtimestamp(
+                                        start_time / 1000, tz=timezone.utc
+                                    ).replace(tzinfo=None)
+                                else:
+                                    dt = datetime.fromtimestamp(
+                                        start_time, tz=timezone.utc
+                                    ).replace(tzinfo=None)
+                            else:
+                                logger.debug(
+                                    f"Unhandled start_time type for base_date: {type(start_time)} = {start_time}"
+                                )
+                                continue
+
+                            if earliest_date is None or dt.date() < earliest_date:
+                                earliest_date = dt.date()
+                        except Exception as e:
+                            logger.debug(f"Error parsing start_time for base_date: {e}")
+                            continue
+
+                if earliest_date:
+                    base_date = earliest_date
+                    logger.info(f"Determined base_date from pinned tasks: {base_date}")
+                else:
+                    base_date = date.today()
+                    logger.warning(
+                        "Could not determine base_date from pinned tasks, using today"
+                    )
+            else:
+                base_date = date.today()
+
         tasks = []
         for _, row in task_df.iterrows():
+            # Check if task is pinned and should preserve its start_slot
+            is_pinned = row.get("Pinned", False)
+
+            # For pinned tasks, calculate start_slot from the Start datetime
+            if is_pinned and "Start" in row and row["Start"] is not None:
+                try:
+                    start_time = row["Start"]
+
+                    # Handle different datetime formats
+                    if isinstance(start_time, str):
+                        # Parse ISO string
+                        start_time = datetime.fromisoformat(
+                            start_time.replace("Z", "+00:00")
+                        )
+                    elif isinstance(start_time, pd.Timestamp):
+                        # Convert pandas Timestamp to datetime
+                        start_time = start_time.to_pydatetime()
+                    elif isinstance(start_time, (int, float)):
+                        # Handle Unix timestamp (milliseconds or seconds)
+                        try:
+                            # If it's a large number, assume milliseconds
+                            if start_time > 1e10:
+                                start_time = datetime.fromtimestamp(
+                                    start_time / 1000, tz=timezone.utc
+                                ).replace(tzinfo=None)
+                            else:
+                                start_time = datetime.fromtimestamp(
+                                    start_time, tz=timezone.utc
+                                ).replace(tzinfo=None)
+                        except (ValueError, OSError) as e:
+                            logger.warning(
+                                f"Cannot convert timestamp {start_time} to datetime: {e}"
+                            )
+                            start_slot = 0
+                    elif not isinstance(start_time, datetime):
+                        # Skip conversion if we can't parse the datetime
+                        logger.warning(
+                            f"Cannot parse start time for pinned task: {start_time} (type: {type(start_time)})"
+                        )
+                        start_slot = 0
+
+                    if isinstance(start_time, datetime):
+                        start_slot = datetime_to_slot(start_time, base_date)
+                        logger.info(
+                            f"Converted datetime {start_time} to slot {start_slot} for pinned task (base: {base_date})"
+                        )
+                    else:
+                        start_slot = 0
+
+                except Exception as e:
+                    logger.warning(
+                        f"Error converting datetime to slot for pinned task: {e}"
+                    )
+                    start_slot = 0
+            else:
+                start_slot = 0  # Will be assigned by solver for non-pinned tasks
+
             tasks.append(
                 Task(
                     id=next(ids),
                     description=row["Task"],
                     duration_slots=int(float(row["Duration (hours)"]) * 2),
-                    start_slot=0,
+                    start_slot=start_slot,
                     required_skill=row["Required Skill"],
                     project_id=row.get("Project", ""),
                     sequence_number=int(row.get("Sequence", 0)),
+                    pinned=is_pinned,
+                    employee=None,  # Will be assigned in generate_schedule_for_solving
                 )
             )
 
-        logger.info(f"✅ Converted {len(tasks)} tasks for solver")
+        logger.info(
+            f"✅ Converted {len(tasks)} tasks for solver (base_date: {base_date})"
+        )
         return tasks

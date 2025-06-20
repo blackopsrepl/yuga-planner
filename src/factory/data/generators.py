@@ -5,6 +5,7 @@ from itertools import product
 
 from factory.data.models import *
 from constraint_solvers.timetable.domain import *
+from utils.extract_calendar import datetime_to_slot, calculate_duration_slots
 
 
 ### EMPLOYEES ###
@@ -209,9 +210,11 @@ def generate_tasks_from_calendar(
     parameters: TimeTableDataParameters,
     random: Random,
     calendar_entries: list[dict],
+    base_date: date = None,
 ) -> list[Task]:
     """
     Generate Task objects from calendar entries with Skills.
+    Calendar tasks are pinned to their original datetime slots.
     """
     tasks: list[Task] = []
     ids = generate_task_ids()
@@ -225,13 +228,27 @@ def generate_tasks_from_calendar(
             else:
                 required_skill = random.choice(parameters.skill_set.optional_skills)
 
+        # Calculate start_slot and duration_slots from calendar datetime info
+        start_datetime = entry.get("start_datetime")
+        end_datetime = entry.get("end_datetime")
+
+        if start_datetime and end_datetime and base_date:
+            # Calculate actual slot and duration from calendar times
+            start_slot = datetime_to_slot(start_datetime, base_date)
+            duration_slots = calculate_duration_slots(start_datetime, end_datetime)
+        else:
+            # Fallback to default values if datetime info is missing
+            start_slot = entry.get("start_slot", 0)
+            duration_slots = entry.get("duration_slots", 2)  # Default 1 hour
+
         tasks.append(
             Task(
                 id=next(ids),
                 description=entry["summary"],
-                duration_slots=entry.get("duration_slots", 2),  # Default 1 hour
-                start_slot=entry.get("start_slot", 0),
+                duration_slots=duration_slots,
+                start_slot=start_slot,
                 required_skill=required_skill,
+                pinned=True,  # Pin calendar tasks to their original times
             )
         )
 

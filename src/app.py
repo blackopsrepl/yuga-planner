@@ -51,8 +51,14 @@ def app(debug: bool = False):
     with gr.Blocks() as demo:
         gr.Markdown(
             """
-            # Yuga Planner
-            Yuga Planner is a neuro-symbolic system prototype: it provides an agent-powered team scheduling and task allocation platform built on [Gradio](https://gradio.app/).
+            # 🐍 Yuga Planner
+
+            **Yuga Planner** is a neuro-symbolic system that combines AI agents with constraint optimization
+            for intelligent scheduling.
+
+            ## 🔌 **Using as MCP Tool**
+
+            You can use Yuga Planner as an MCP server to integrate scheduling into your AI workflows.
             """
         )
 
@@ -66,18 +72,6 @@ def app(debug: bool = False):
 
 def _draw_info_page(debug: bool = False):
     with gr.Tab("📋 Information"):
-        gr.Markdown(
-            """
-            # 🐍 Yuga Planner
-
-            **Yuga Planner** is a neuro-symbolic system that combines AI agents with constraint optimization
-            for intelligent scheduling.
-
-            ## 🔌 **Using as MCP Tool**
-
-            You can use Yuga Planner as an MCP server to integrate scheduling into your AI workflows.
-            """
-        )
 
         def get_server_url():
             try:

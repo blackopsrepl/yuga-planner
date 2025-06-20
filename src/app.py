@@ -13,13 +13,13 @@ if not os.getenv("NEBIUS_API_KEY") or not os.getenv("NEBIUS_MODEL"):
     load_secrets("tests/secrets/creds.py")
 
 
-from handlers.web_backend import (
-    load_data,
-    show_solved,
-    start_timer,
-    auto_poll,
-    show_mock_project_content,
-)
+# from handlers.web_backend import (
+#     load_data,
+#     show_solved,
+#     start_timer,
+#     auto_poll,
+#     show_mock_project_content,
+# )
 
 from handlers.mcp_backend import process_message_and_attached_file
 
@@ -57,7 +57,6 @@ def app(debug: bool = False):
         )
 
         _draw_info_page(debug)
-        # _draw_hackathon_page(debug)
 
         # Register the MCP tool as an API endpoint
         gr.api(process_message_and_attached_file)
@@ -66,7 +65,19 @@ def app(debug: bool = False):
 
 
 def _draw_info_page(debug: bool = False):
-    with gr.Tab("Information"):
+    with gr.Tab("📋 Information"):
+        gr.Markdown(
+            """
+            # 🐍 Yuga Planner
+
+            **Yuga Planner** is a neuro-symbolic system that combines AI agents with constraint optimization
+            for intelligent scheduling.
+
+            ## 🔌 **Using as MCP Tool**
+
+            You can use Yuga Planner as an MCP server to integrate scheduling into your AI workflows.
+            """
+        )
 
         def get_server_url():
             try:
@@ -74,290 +85,115 @@ def _draw_info_page(debug: bool = False):
             except:
                 return "http://localhost:7860/gradio_api/mcp/sse"
 
-        gr.Markdown(
-            f"""
-            This is a demo of the Yuga Planner system.
-
-            To use as an MCP server:
-            1. Register the MCP server with your client using the URL:
-            ```
-            {get_server_url()}
-            ```
-            2. Call the tool from your client. Example:
-            ```
-            use yuga planner tool @tests/data/calendar.ics
-            Task Description: Create a new AWS VPC
-            ```
-
-            """
+        gr.Textbox(
+            value=get_server_url(),
+            label="🌐 MCP Server Endpoint",
+            interactive=False,
+            max_lines=1,
         )
 
+        with gr.Accordion("📝 MCP Setup Instructions", open=True):
+            gr.Markdown(
+                """
+                ### 1. **Cursor Setup Instructions (should work from any MCP client!)**
 
-def _draw_hackathon_page(debug: bool = False):
-    with gr.Tab("Hackathon Agent Demo"):
-        gr.Markdown("### SWE Team Task Scheduling Demo")
+                **For Cursor AI Editor:**
+                1. Create or edit your MCP configuration file: `~/.cursor/mcp.json`
+                2. Add the yuga-planner server configuration:
+                ```json
+                {
+                  "mcpServers": {
+                    "yuga-planner": {
+                      "url": -> "Insert the above endpoint URL here"
+                    }
+                  }
+                }
+                ```
+                3. If you already have other MCP servers, add `yuga-planner` to the existing `mcpServers` object
+                4. Restart Cursor to load the new configuration
+                5. The tool will be available in your chat
 
-        gr.Markdown(
-            """
-            ## Instructions
-            1. Choose a project source - either upload your own project file(s) or select from our mock projects
-            2. Click 'Load Data' to parse, decompose, and estimate tasks
-            3. Click 'Solve' to generate an optimal schedule based on employee skills and availability
-            4. Review the results in the tables below
-            """
-        )
-
-        # Project source selector
-        project_source = gr.Radio(
-            choices=["Upload Project Files", "Use Mock Projects"],
-            value="Upload Project Files",
-            label="Project Source",
-        )
-
-        # Configuration parameters
-        with gr.Row():
-            employee_count = gr.Number(
-                label="Number of Employees",
-                value=12,
-                minimum=1,
-                maximum=100,
-                step=1,
-                precision=0,
-            )
-            days_in_schedule = gr.Number(
-                label="Days in Schedule",
-                value=365,
-                minimum=1,
-                maximum=365,
-                step=1,
-                precision=0,
+                ### 2. **Usage Example**
+                """
             )
 
-        # File upload component (initially visible)
-        with gr.Group(visible=True) as file_upload_group:
-            file_upload = gr.File(
-                label="Upload Project Files (Markdown)",
-                file_types=[".md"],
-                file_count="multiple",
+            gr.Textbox(
+                value="""use yuga-planner mcp tool
+Task Description: Create a new EC2 instance on AWS
+
+[Attach your calendar.ics file to provide existing commitments]
+
+Tool Response: Optimized schedule created - EC2 setup task assigned to
+available time slots around your existing meetings
+[Returns JSON response with schedule data]
+
+User: show all fields as a table, ordered by start date
+
+[Displays formatted schedule table with all tasks and calendar events]""",
+                label="💬 Cursor Chat Usage Example",
+                interactive=False,
+                lines=10,
             )
 
-        # Mock projects dropdown (initially hidden)
-        with gr.Group(visible=False) as mock_projects_group:
-            # Get mock project names from ProjectService
-            available_projects = MockProjectService.get_available_project_names()
-            mock_project_dropdown = gr.Dropdown(
-                choices=available_projects,
-                label="Select Mock Projects (multiple selection allowed)",
-                value=[available_projects[0]] if available_projects else [],
-                multiselect=True,
+            gr.Markdown(
+                """
+                ### 3. **What it does**
+
+                **Personal Task Scheduling with Calendar Integration:**
+
+                1. 📅 **Parses your calendar** (.ics file) for existing commitments
+                2. 🤖 **AI breaks down your task** into actionable subtasks using LLamaIndex + Nebius AI
+                3. ⚡ **Constraint-based optimization** finds optimal time slots around your existing schedule
+                4. 📋 **Returns complete solved schedule** integrated with your personal calendar events
+                5. 🕘 **Respects business hours** (9:00-18:00) and excludes weekends automatically
+                6. 📊 **JSON response format** - Ask to "show all fields as a table, ordered by start date" for readable formatting
+
+                **Designed for**: Personal productivity and task planning around existing appointments in Cursor.
+                """
             )
 
-            # Accordion for viewing mock project content
-            with gr.Accordion("📋 Project Content Preview", open=False):
-                mock_project_content_accordion = gr.Textbox(
-                    label="Project Content",
-                    interactive=False,
-                    lines=15,
-                    max_lines=20,
-                    show_copy_button=True,
-                    placeholder="Select projects above and expand this section to view content...",
+        if debug:
+            with gr.Tab("🐛 Debug Info"):
+                gr.Markdown(
+                    """
+                    # 🐛 Debug Information
+
+                    **Debug Mode Enabled** - Additional system information and controls available.
+                    """
                 )
 
-            # Auto-update content when projects change
-            mock_project_dropdown.change(
-                show_mock_project_content,
-                inputs=[mock_project_dropdown],
-                outputs=[mock_project_content_accordion],
-            )
+                with gr.Accordion("🔧 **Environment Details**", open=True):
+                    import os
 
-        # Log Terminal - Always visible for streaming logs
-        gr.Markdown("## Live Log Terminal")
+                    env_info = f"""
+                    **🐍 Python Environment**
+                    - Debug Mode: {debug}
+                    - YUGA_DEBUG: {os.getenv('YUGA_DEBUG', 'Not Set')}
+                    - Nebius API Key: {'✅ Set' if os.getenv('NEBIUS_API_KEY') else '❌ Not Set'}
+                    - Nebius Model: {os.getenv('NEBIUS_MODEL', 'Not Set')}
 
-        # Show debug status
-        if debug:
-            gr.Markdown(
-                "🐛 **Debug Mode Enabled** - Showing detailed logs including DEBUG messages"
-            )
-        else:
-            gr.Markdown(
-                "ℹ️ **Normal Mode** - Showing INFO, WARNING, and ERROR messages"
-            )
+                    **🌐 Server Information**
+                    - MCP Endpoint: {get_server_url()}
+                    - Current Working Directory: {os.getcwd()}
+                    """
+                    gr.Markdown(env_info)
 
-        log_terminal = gr.Textbox(
-            label="Processing Logs",
-            interactive=False,
-            lines=8,
-            max_lines=15,
-            show_copy_button=True,
-            placeholder="Logs will appear here during data loading and solving...",
-        )
+                with gr.Accordion("📊 **System Status**", open=False):
+                    gr.Markdown(
+                        """
+                        **🔄 Service Status**
+                        - DataService: ✅ Active
+                        - ScheduleService: ✅ Active
+                        - StateService: ✅ Active
+                        - LoggingService: ✅ Active
+                        - MockProjectService: ✅ Active
 
-        # Toggle visibility based on project source selection
-        def toggle_visibility(choice):
-            if choice == "Upload Project Files":
-                return gr.update(visible=True), gr.update(visible=False)
-            else:
-                return gr.update(visible=False), gr.update(visible=True)
-
-        project_source.change(
-            toggle_visibility,
-            inputs=[project_source],
-            outputs=[file_upload_group, mock_projects_group],
-        )
-
-        # State for LLM output, persists per session
-        llm_output_state = gr.State(value=None)
-        job_id_state = gr.State(value=None)
-        status_text = gr.Textbox(
-            label="Solver Status",
-            interactive=False,
-            lines=8,
-            max_lines=20,
-            show_copy_button=True,
-        )
-
-        with gr.Row():
-            load_btn = gr.Button("Load Data")
-            solve_btn = gr.Button("Solve", interactive=False)  # Initially disabled
-
-        gr.Markdown("## Employees")
-        employees_table = gr.Dataframe(label="Employees", interactive=False)
-
-        gr.Markdown("## Tasks")
-        schedule_table = gr.Dataframe(label="Tasks Table", interactive=False)
-
-        # Outputs: always keep state as last output
-        outputs = [
-            employees_table,
-            schedule_table,
-            job_id_state,
-            status_text,
-            llm_output_state,
-            log_terminal,
-        ]
-
-        # Outputs for load_data that also enables solve button
-        load_outputs = outputs + [solve_btn]
-
-        # Create wrapper function to pass debug flag to auto_poll
-        async def auto_poll_with_debug(job_id, llm_output):
-            result = await auto_poll(job_id, llm_output, debug=debug)
-            # auto_poll now returns 6 values including logs
-            return result
-
-        # Timer for polling (not related to state)
-        timer = gr.Timer(2, active=False)
-        timer.tick(
-            auto_poll_with_debug,
-            inputs=[job_id_state, llm_output_state],
-            outputs=outputs,  # This now includes log_terminal updates
-        )
-
-        # Create wrapper function to pass debug flag to load_data
-        async def load_data_with_debug(
-            project_source,
-            file_obj,
-            mock_projects,
-            employee_count,
-            days_in_schedule,
-            llm_output,
-            progress=gr.Progress(),
-        ):
-            async for result in load_data(
-                project_source,
-                file_obj,
-                mock_projects,
-                employee_count,
-                days_in_schedule,
-                llm_output,
-                debug=debug,
-                progress=progress,
-            ):
-                yield result
-
-        # Use state as both input and output
-        load_btn.click(
-            load_data_with_debug,
-            inputs=[
-                project_source,
-                file_upload,
-                mock_project_dropdown,
-                employee_count,
-                days_in_schedule,
-                llm_output_state,
-            ],
-            outputs=load_outputs,
-            api_name="load_data",
-        )
-
-        # Create wrapper function to pass debug flag to show_solved
-        async def show_solved_with_debug(state_data, job_id):
-            return await show_solved(state_data, job_id, debug=debug)
-
-        solve_btn.click(
-            show_solved_with_debug,
-            inputs=[llm_output_state, job_id_state],
-            outputs=outputs,
-        ).then(start_timer, inputs=[job_id_state, llm_output_state], outputs=timer)
-
-        if debug:
-            gr.Markdown("### 🐛 Debug Controls")
-            gr.Markdown(
-                "These controls help test the centralized logging system and state management."
-            )
-
-            def debug_set_state(state):
-                logger.info("DEBUG: Setting state to test_value")
-                logger.debug("DEBUG: Detailed state operation in progress")
-                return "Debug: State set!", "test_value"
-
-            def debug_show_state(state):
-                logger.info("DEBUG: Current state is %s", state)
-                logger.debug("DEBUG: State retrieval operation completed")
-                return f"Debug: Current state: {state}", gr.update()
-
-            def debug_test_logging():
-                """Test all logging levels for UI demonstration"""
-                logger.debug("🐛 DEBUG: This is a debug message")
-                logger.info("ℹ️ INFO: This is an info message")
-                logger.warning("⚠️ WARNING: This is a warning message")
-                logger.error("❌ ERROR: This is an error message")
-                return "Generated test log messages at all levels"
-
-            debug_out = gr.Textbox(label="Debug Output")
-
-            with gr.Row():
-                debug_set_btn = gr.Button("Debug Set State")
-                debug_show_btn = gr.Button("Debug Show State")
-                debug_log_btn = gr.Button("Test Log Levels")
-
-            debug_set_btn.click(
-                debug_set_state,
-                inputs=[llm_output_state],
-                outputs=[debug_out, llm_output_state],
-            )
-            debug_show_btn.click(
-                debug_show_state,
-                inputs=[llm_output_state],
-                outputs=[debug_out, gr.State()],
-            )
-            debug_log_btn.click(
-                debug_test_logging,
-                inputs=[],
-                outputs=[debug_out],
-            )
-
-
-def set_test_state():
-    logger.debug("Setting state to test_value")
-    app_state.set("test_key", "test_value")
-    return "State set to test_value"
-
-
-def get_test_state():
-    state = app_state.get("test_key", "No state found")
-    logger.debug("Current state is %s", state)
-    return f"Current state: {state}"
+                        **🔌 Integration Status**
+                        - MCP Server: ✅ Enabled
+                        - Gradio API: ✅ Active
+                        - Real-time Logs: ✅ Streaming
+                        """
+                    )
 
 
 if __name__ == "__main__":

@@ -29,7 +29,7 @@ run:
 	$(ACTIVATE); $(PYTHON) src/app.py
 
 test:
-	$(ACTIVATE); pytest
+	$(ACTIVATE); pytest -v -s
 
 lint:
 	$(ACTIVATE); pre-commit run --all-files

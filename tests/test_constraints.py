@@ -1,8 +1,15 @@
 import pytest
+import sys
 from datetime import date, timedelta
 from decimal import Decimal
 from timefold.solver.test import ConstraintVerifier
 from timefold.solver.score import HardSoftDecimalScore
+
+# Import standardized test utilities
+from tests.test_utils import get_test_logger, create_test_results
+
+# Initialize standardized test logger
+logger = get_test_logger(__name__)
 
 from src.constraint_solvers.timetable.constraints import (
     define_constraints,
@@ -36,6 +43,8 @@ class TestConstraints:
 
     def setup_method(self):
         """Set up common test data and ConstraintVerifier instance."""
+        logger.debug("Setting up test constraints and data...")
+
         self.constraint_verifier = ConstraintVerifier.build(
             define_constraints, EmployeeSchedule, Task
         )
@@ -50,10 +59,14 @@ class TestConstraints:
         self.employee_bob = self.employees["bob"]
         self.employee_charlie = self.employees["charlie"]
 
+        logger.debug(f"Created {len(self.employees)} test employees and schedule info")
+
     # ==================== HARD CONSTRAINT TESTS ====================
 
     def test_required_skill_constraint_violation(self):
         """Test that tasks requiring skills not possessed by assigned employee are penalized."""
+        logger.debug("Testing required skill constraint violation...")
+
         task = create_task(
             task_id="task1",
             description="Python Development",
@@ -67,8 +80,12 @@ class TestConstraints:
             .penalizes_by(1)
         )
 
+        logger.debug("✅ Required skill constraint violation test passed")
+
     def test_required_skill_constraint_satisfied(self):
         """Test that tasks assigned to employees with required skills are not penalized."""
+        logger.debug("Testing required skill constraint satisfaction...")
+
         task = create_task(
             task_id="task1",
             description="Python Development",
@@ -82,8 +99,12 @@ class TestConstraints:
             .penalizes_by(0)
         )
 
+        logger.debug("✅ Required skill constraint satisfaction test passed")
+
     def test_required_skill_constraint_unassigned_task(self):
         """Test that unassigned tasks don't trigger required skill constraint."""
+        logger.debug("Testing required skill constraint with unassigned task...")
+
         task = create_task(
             task_id="task1",
             description="Python Development",
@@ -97,8 +118,12 @@ class TestConstraints:
             .penalizes_by(0)
         )
 
+        logger.debug("✅ Required skill constraint unassigned task test passed")
+
     def test_no_overlapping_tasks_constraint_violation(self):
         """Test that overlapping tasks for the same employee are penalized."""
+        logger.debug("Testing no overlapping tasks constraint violation...")
+
         task1 = create_task(
             task_id="task1",
             description="Task 1",
@@ -124,8 +149,12 @@ class TestConstraints:
             .penalizes_by(2)
         )
 
+        logger.debug("✅ No overlapping tasks constraint violation test passed")
+
     def test_no_overlapping_tasks_constraint_different_employees(self):
         """Test that overlapping tasks for different employees are not penalized."""
+        logger.debug("Testing no overlapping tasks with different employees...")
+
         task1 = create_task(
             task_id="task1",
             description="Task 1",
@@ -152,8 +181,12 @@ class TestConstraints:
             .penalizes_by(0)
         )
 
+        logger.debug("✅ No overlapping tasks different employees test passed")
+
     def test_no_overlapping_tasks_constraint_adjacent_tasks(self):
         """Test that adjacent (non-overlapping) tasks for the same employee are not penalized."""
+        logger.debug("Testing no overlapping tasks with adjacent tasks...")
+
         task1 = create_task(
             task_id="task1",
             description="Task 1",
@@ -178,8 +211,12 @@ class TestConstraints:
             .penalizes_by(0)
         )
 
+        logger.debug("✅ No overlapping tasks adjacent tasks test passed")
+
     def test_task_within_schedule_constraint_violation(self):
         """Test that tasks starting before slot 0 are penalized."""
+        logger.debug("Testing task within schedule constraint violation...")
+
         task = create_task(
             task_id="task1",
             description="Invalid Task",
@@ -194,8 +231,12 @@ class TestConstraints:
             .penalizes_by(1)
         )
 
+        logger.debug("✅ Task within schedule constraint violation test passed")
+
     def test_task_within_schedule_constraint_satisfied(self):
         """Test that tasks starting at valid slots are not penalized."""
+        logger.debug("Testing task within schedule constraint satisfaction...")
+
         task = create_task(
             task_id="task1",
             description="Valid Task",
@@ -209,6 +250,8 @@ class TestConstraints:
             .given(task, self.employee_alice, self.schedule_info)
             .penalizes_by(0)
         )
+
+        logger.debug("✅ Task within schedule constraint satisfaction test passed")
 
     def test_task_fits_in_schedule_constraint_violation(self):
         """Test that tasks extending beyond schedule end are penalized."""
@@ -738,3 +781,62 @@ def create_standard_employees(dates):
             skills={"Python", "Testing", "DevOps"},
         ),
     }
+
+
+if __name__ == "__main__":
+    """Direct execution for non-pytest testing"""
+    logger.section("Constraint Solver Tests")
+    logger.info(
+        "Note: This test suite is designed for pytest. For best results, run with:"
+    )
+    logger.info("  pytest tests/test_constraints.py -v")
+    logger.info("  YUGA_DEBUG=true pytest tests/test_constraints.py -v -s")
+
+    # Create test results tracker
+    results = create_test_results(logger)
+
+    try:
+        # Create test instance
+        test_instance = TestConstraints()
+        test_instance.setup_method()
+
+        # Run a few sample tests
+        logger.info("Running sample constraint tests...")
+
+        sample_tests = [
+            (
+                "required_skill_violation",
+                test_instance.test_required_skill_constraint_violation,
+            ),
+            (
+                "required_skill_satisfied",
+                test_instance.test_required_skill_constraint_satisfied,
+            ),
+            (
+                "no_overlapping_violation",
+                test_instance.test_no_overlapping_tasks_constraint_violation,
+            ),
+            (
+                "task_within_schedule",
+                test_instance.test_task_within_schedule_constraint_satisfied,
+            ),
+        ]
+
+        for test_name, test_func in sample_tests:
+            results.run_test(test_name, test_func)
+
+        logger.info(f"✅ Completed {len(sample_tests)} sample constraint tests")
+
+    except Exception as e:
+        logger.error(f"Failed to run constraint tests: {e}")
+        results.add_result("constraint_tests_setup", False, str(e))
+
+    # Generate summary and exit with appropriate code
+    all_passed = results.summary()
+
+    if not all_passed:
+        logger.info(
+            "💡 Hint: Use 'pytest tests/test_constraints.py' for full test coverage"
+        )
+
+    sys.exit(0 if all_passed else 1)

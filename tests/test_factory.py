@@ -2,11 +2,18 @@ import pytest
 import time
 import pandas as pd
 import traceback
+import sys
 from io import StringIO
 from datetime import datetime, date, timedelta
 from typing import List, Dict, Tuple, Optional, Any
 
 from src.utils.load_secrets import load_secrets
+
+# Import standardized test utilities
+from tests.test_utils import get_test_logger, create_test_results
+
+# Initialize standardized test logger
+logger = get_test_logger(__name__)
 
 # Load environment variables for agent (if needed)
 load_secrets("tests/secrets/creds.py")
@@ -26,8 +33,11 @@ def cleanup_solver():
 
     # Cleanup: Terminate all active solver jobs and shutdown solver manager
     try:
+        import time
         from constraint_solvers.timetable.solver import solver_manager
         from src.state import app_state
+
+        logger.info("🧹 Starting solver cleanup...")
 
         # Clear all stored schedules first
         app_state.clear_solved_schedules()
@@ -37,24 +47,43 @@ def cleanup_solver():
             # According to Timefold docs, terminateEarly() affects all jobs for this manager
             try:
                 solver_manager.terminateEarly()
-                print("🧹 Terminated all active solver jobs")
+                logger.info("🧹 Terminated all active solver jobs")
+
+                # Give some time for the termination to complete
+                time.sleep(0.5)
+
             except Exception as e:
-                print(f"⚠️ Error terminating solver jobs: {e}")
+                logger.warning(f"⚠️ Error terminating solver jobs: {e}")
 
         # Try additional cleanup methods if available
         if hasattr(solver_manager, "close"):
-            solver_manager.close()
-            print("🔒 Closed solver manager")
-        elif hasattr(solver_manager, "shutdown"):
-            solver_manager.shutdown()
-            print("🔒 Shutdown solver manager")
-        else:
-            print("⚠️ No explicit close/shutdown method found on solver manager")
+            try:
+                solver_manager.close()
+                logger.info("🔒 Closed solver manager")
 
-        print("✅ Solver cleanup completed successfully")
+            except Exception as e:
+                logger.warning(f"⚠️ Error closing solver manager: {e}")
+
+        elif hasattr(solver_manager, "shutdown"):
+            try:
+                solver_manager.shutdown()
+                logger.info("🔒 Shutdown solver manager")
+
+            except Exception as e:
+                logger.warning(f"⚠️ Error shutting down solver manager: {e}")
+
+        else:
+            logger.warning(
+                "⚠️ No explicit close/shutdown method found on solver manager"
+            )
+
+        # Additional small delay to allow cleanup to complete
+        time.sleep(0.2)
+
+        logger.info("✅ Solver cleanup completed successfully")
 
     except Exception as e:
-        print(f"⚠️ Error during solver cleanup: {e}")
+        logger.warning(f"⚠️ Error during solver cleanup: {e}")
         # Don't fail tests if cleanup fails, but log it
 
 
@@ -97,11 +126,11 @@ def load_calendar_entries(file_path: str) -> List[Dict]:
 
 def print_calendar_entries(entries: List[Dict], title: str = "Calendar Entries"):
     """Print calendar entries in a formatted way."""
-    print(f"\n📅 {title} ({len(entries)} entries):")
+    logger.debug(f"📅 {title} ({len(entries)} entries):")
     for i, entry in enumerate(entries):
         start_dt = entry.get("start_datetime")
         end_dt = entry.get("end_datetime")
-        print(f"  {i+1}. {entry['summary']}: {start_dt} → {end_dt}")
+        logger.debug(f"  {i+1}. {entry['summary']}: {start_dt} → {end_dt}")
 
 
 def calculate_required_schedule_days(
@@ -183,8 +212,8 @@ async def solve_schedule_with_polling(
         state_data=state_data, job_id=None, debug=True
     )
 
-    print(f"Solver started with job_id: {job_id}")
-    print(f"Initial status: {status}")
+    logger.info(f"Solver started with job_id: {job_id}")
+    logger.debug(f"Initial status: {status}")
 
     # Poll for solution using the correct StateService methods
     max_polls = TEST_CONFIG["solver_max_polls"]
@@ -194,7 +223,7 @@ async def solve_schedule_with_polling(
 
     try:
         for poll_count in range(1, max_polls + 1):
-            print(f"  Polling {poll_count}/{max_polls}...")
+            logger.debug(f"  Polling {poll_count}/{max_polls}...")
             time.sleep(poll_interval)
 
             # Use StateService to check for completed solution
@@ -202,7 +231,7 @@ async def solve_schedule_with_polling(
                 solved_schedule = StateService.get_solved_schedule(job_id)
 
                 if solved_schedule is not None:
-                    print(f"✅ Schedule solved after {poll_count} polls!")
+                    logger.info(f"✅ Schedule solved after {poll_count} polls!")
 
                     # Convert solved schedule to DataFrame
                     final_df = schedule_to_dataframe(solved_schedule)
@@ -213,15 +242,15 @@ async def solve_schedule_with_polling(
                     )
 
                     if "CONSTRAINTS VIOLATED" in status_message:
-                        print(f"❌ Solver failed: {status_message}")
+                        logger.warning(f"❌ Solver failed: {status_message}")
                         final_df = None
                     else:
-                        print(f"✅ Solver succeeded: {status_message}")
+                        logger.info(f"✅ Solver succeeded: {status_message}")
 
                     break
 
         if final_df is None:
-            print("⏰ Solver timed out after max polls")
+            logger.warning("⏰ Solver timed out after max polls")
 
     finally:
         # Clean up: Ensure solver job is terminated
@@ -232,21 +261,24 @@ async def solve_schedule_with_polling(
             if hasattr(solver_manager, "terminateEarly"):
                 try:
                     solver_manager.terminateEarly(job_id)
-                    print(f"🧹 Terminated solver job: {job_id}")
+                    logger.info(f"🧹 Terminated solver job: {job_id}")
                 except Exception as e:
                     # If specific job termination fails, try to terminate all jobs
-                    print(f"⚠️ Error terminating specific job {job_id}: {e}")
+                    logger.warning(f"⚠️ Error terminating specific job {job_id}: {e}")
                     try:
                         solver_manager.terminateEarly()
-                        print(
+                        logger.info(
                             f"🧹 Terminated all solver jobs after specific termination failed"
                         )
                     except Exception as e2:
-                        print(f"⚠️ Could not terminate any solver jobs: {e2}")
+                        logger.warning(f"⚠️ Could not terminate any solver jobs: {e2}")
             else:
-                print(f"⚠️ terminateEarly method not available on solver_manager")
+                logger.warning(
+                    f"⚠️ terminateEarly method not available on solver_manager"
+                )
+
         except Exception as e:
-            print(f"⚠️ Could not access solver_manager for cleanup: {e}")
+            logger.warning(f"⚠️ Could not access solver_manager for cleanup: {e}")
 
     return final_df
 
@@ -261,23 +293,29 @@ def calculate_required_schedule_days_from_df(
     for _, row in pinned_df.iterrows():
         for date_col in ["Start", "End"]:
             date_val = row.get(date_col)
+
             if date_val is not None:
                 try:
                     if isinstance(date_val, str):
                         dt = datetime.fromisoformat(date_val.replace("Z", "+00:00"))
+
                     else:
                         dt = pd.to_datetime(date_val).to_pydatetime()
 
                     if earliest_date is None or dt.date() < earliest_date:
                         earliest_date = dt.date()
+
                     if latest_date is None or dt.date() > latest_date:
                         latest_date = dt.date()
+
                 except:
                     continue
 
     if earliest_date and latest_date:
         calendar_span = (latest_date - earliest_date).days + 1
+
         return calendar_span + buffer_days
+
     else:
         return 60  # Default
 
@@ -297,28 +335,28 @@ def analyze_schedule_dataframe(
         "project_df": project_tasks,
     }
 
-    print(f"\n📊 {title} ({analysis['total_tasks']} tasks):")
-    print(f"  - EXISTING (calendar): {analysis['existing_tasks']} tasks")
-    print(f"  - PROJECT (LLM): {analysis['project_tasks']} tasks")
+    logger.debug(f"\n📊 {title} ({analysis['total_tasks']} tasks):")
+    logger.debug(f"  - EXISTING (calendar): {analysis['existing_tasks']} tasks")
+    logger.debug(f"  - PROJECT (LLM): {analysis['project_tasks']} tasks")
 
     return analysis
 
 
 def verify_calendar_tasks_pinned(existing_tasks_df: pd.DataFrame) -> bool:
     """Verify that all calendar tasks are pinned."""
-    print(f"\n🔒 Verifying calendar tasks are pinned:")
+    logger.debug(f"\n🔒 Verifying calendar tasks are pinned:")
     all_pinned = True
 
     for _, task in existing_tasks_df.iterrows():
         is_pinned = task.get("Pinned", False)
         task_name = task["Task"]
-        print(f"  - {task_name}: pinned = {is_pinned}")
+        logger.debug(f"  - {task_name}: pinned = {is_pinned}")
 
         if not is_pinned:
             all_pinned = False
-            print(f"    ❌ Calendar task should be pinned!")
+            logger.warning(f"    ❌ Calendar task should be pinned!")
         else:
-            print(f"    ✅ Calendar task properly pinned")
+            logger.info(f"    ✅ Calendar task properly pinned")
 
     return all_pinned
 
@@ -327,7 +365,7 @@ def verify_time_preservation(
     original_times: Dict, final_tasks_df: pd.DataFrame
 ) -> bool:
     """Verify that calendar tasks preserved their original times."""
-    print(f"\n🔍 Verifying calendar tasks preserved their original times:")
+    logger.debug(f"\n🔍 Verifying calendar tasks preserved their original times:")
     time_preserved = True
 
     for _, task in final_tasks_df.iterrows():
@@ -336,17 +374,17 @@ def verify_time_preservation(
 
         original = original_times.get(task_name)
         if original is None:
-            print(f"  - {task_name}: ❌ Not found in original data")
+            logger.warning(f"  - {task_name}: ❌ Not found in original data")
             time_preserved = False
             continue
 
         # Normalize and compare times
         preserved = compare_datetime_values(original["start"], final_start)
 
-        print(f"  - {task_name}:")
-        print(f"    Original: {original['start']}")
-        print(f"    Final:    {final_start}")
-        print(f"    Preserved: {'✅' if preserved else '❌'}")
+        logger.debug(f"  - {task_name}:")
+        logger.debug(f"    Original: {original['start']}")
+        logger.debug(f"    Final:    {final_start}")
+        logger.debug(f"    Preserved: {'✅' if preserved else '❌'}")
 
         if not preserved:
             time_preserved = False
@@ -369,10 +407,12 @@ def compare_datetime_values(dt1: Any, dt2: Any, tolerance_seconds: int = None) -
         # Normalize timezones for comparison
         if dt1.tzinfo is not None and dt2.tzinfo is None:
             dt1 = dt1.replace(tzinfo=None)
+
         elif dt1.tzinfo is None and dt2.tzinfo is not None:
             dt2 = dt2.replace(tzinfo=None)
 
         return abs((dt1 - dt2).total_seconds()) < tolerance
+
     except:
         return False
 
@@ -388,9 +428,9 @@ def store_original_calendar_times(existing_tasks_df: pd.DataFrame) -> Dict[str, 
             "pinned": task.get("Pinned", False),
         }
 
-    print("\n📌 Original calendar task times:")
+    logger.debug("\n📌 Original calendar task times:")
     for task_name, times in original_times.items():
-        print(
+        logger.debug(
             f"  - {task_name}: {times['start']} → {times['end']} (pinned: {times['pinned']})"
         )
 
@@ -399,7 +439,7 @@ def store_original_calendar_times(existing_tasks_df: pd.DataFrame) -> Dict[str, 
 
 def verify_llm_tasks_scheduled(project_tasks_df: pd.DataFrame) -> bool:
     """Verify that LLM tasks are properly scheduled and not pinned."""
-    print(f"\n🔄 Verifying LLM tasks were properly scheduled:")
+    logger.debug(f"\n🔄 Verifying LLM tasks were properly scheduled:")
     all_scheduled = True
 
     for _, task in project_tasks_df.iterrows():
@@ -407,23 +447,25 @@ def verify_llm_tasks_scheduled(project_tasks_df: pd.DataFrame) -> bool:
         start_time = task["Start"]
         is_pinned = task.get("Pinned", False)
 
-        print(f"  - {task_name}:")
-        print(f"    Scheduled at: {start_time}")
-        print(f"    Pinned: {is_pinned}")
+        logger.debug(f"  - {task_name}:")
+        logger.debug(f"    Scheduled at: {start_time}")
+        logger.debug(f"    Pinned: {is_pinned}")
 
         # LLM tasks should not be pinned
         if is_pinned:
             all_scheduled = False
-            print(f"    ❌ LLM task should not be pinned!")
+            logger.warning(f"    ❌ LLM task should not be pinned!")
+
         else:
-            print(f"    ✅ LLM task properly unpinned")
+            logger.info(f"    ✅ LLM task properly unpinned")
 
         # LLM tasks should have been scheduled to actual times
         if start_time is None or start_time == "":
             all_scheduled = False
-            print(f"    ❌ LLM task was not scheduled!")
+            logger.warning(f"    ❌ LLM task was not scheduled!")
+
         else:
-            print(f"    ✅ LLM task was scheduled")
+            logger.info(f"    ✅ LLM task was scheduled")
 
     return all_scheduled
 
@@ -458,9 +500,9 @@ async def test_factory_demo_agent():
         assert hasattr(task, "project_id")
 
     # Print schedule details for debugging
-    print("Employee names:", [e.name for e in schedule.employees])
-    print("Tasks count:", len(schedule.tasks))
-    print("Total slots:", schedule.schedule_info.total_slots)
+    logger.info(f"Employee names: {[e.name for e in schedule.employees]}")
+    logger.info(f"Tasks count: {len(schedule.tasks)}")
+    logger.info(f"Total slots: {schedule.schedule_info.total_slots}")
 
 
 @pytest.mark.asyncio
@@ -478,7 +520,7 @@ async def test_factory_mcp(valid_calendar_entries):
     assert not df.empty
 
     # Print the DataFrame for debug
-    print(df)
+    logger.debug(df)
 
 
 @pytest.mark.asyncio
@@ -487,9 +529,9 @@ async def test_mcp_workflow_calendar_pinning(valid_calendar_entries):
     Test that verifies calendar tasks (EXISTING) remain pinned to their original times
     while LLM tasks (PROJECT) are rescheduled around them in the MCP workflow.
     """
-    print("\n" + "=" * 60)
-    print("Testing MCP Workflow: Calendar Task Pinning vs LLM Task Scheduling")
-    print("=" * 60)
+    logger.debug("\n" + "=" * 60)
+    logger.debug("Testing MCP Workflow: Calendar Task Pinning vs LLM Task Scheduling")
+    logger.debug("=" * 60)
 
     print_calendar_entries(valid_calendar_entries, "Loaded Calendar Entries")
 
@@ -506,12 +548,12 @@ async def test_mcp_workflow_calendar_pinning(valid_calendar_entries):
     assert calendar_pinned, "Calendar tasks should be pinned!"
 
     # Solve the schedule
-    print(f"\n🔧 Running MCP workflow to solve schedule...")
+    logger.debug(f"\n🔧 Running MCP workflow to solve schedule...")
     solved_schedule_df = await solve_schedule_with_polling(initial_df)
 
     if solved_schedule_df is None:
-        print("⏰ Solver timed out - this might be due to complex constraints")
-        print("⚠️  Skipping verification steps for timeout case")
+        logger.warning("⏰ Solver timed out - this might be due to complex constraints")
+        logger.warning("⚠️  Skipping verification steps for timeout case")
         return
 
     # Analyze final schedule (solved_schedule_df is already a DataFrame)
@@ -529,10 +571,10 @@ async def test_mcp_workflow_calendar_pinning(valid_calendar_entries):
     assert time_preserved, "Calendar tasks did not preserve their original times!"
     assert llm_scheduled, "LLM tasks were not properly scheduled!"
 
-    print(f"\n🎉 MCP Workflow Test Results:")
-    print(f"✅ Calendar tasks preserved original times: {time_preserved}")
-    print(f"✅ LLM tasks were properly scheduled: {llm_scheduled}")
-    print(
+    logger.info(f"\n🎉 MCP Workflow Test Results:")
+    logger.info(f"✅ Calendar tasks preserved original times: {time_preserved}")
+    logger.info(f"✅ LLM tasks were properly scheduled: {llm_scheduled}")
+    logger.info(
         "🎯 MCP workflow test passed! Calendar tasks are pinned, LLM tasks are flexible."
     )
 
@@ -542,23 +584,25 @@ async def test_calendar_validation_rejects_invalid_entries(invalid_calendar_entr
     """
     Test that calendar validation properly rejects entries that violate working hours constraints.
     """
-    print("\n" + "=" * 60)
-    print("Testing Calendar Validation: Constraint Violations")
-    print("=" * 60)
+    logger.debug("\n" + "=" * 60)
+    logger.debug("Testing Calendar Validation: Constraint Violations")
+    logger.debug("=" * 60)
 
     print_calendar_entries(invalid_calendar_entries, "Invalid Calendar Entries")
 
     # Test that generate_mcp_data raises an error due to validation failure
     user_message = "Simple test task"
 
-    print(f"\n❌ Attempting to generate MCP data with invalid calendar (should fail)...")
+    logger.debug(
+        f"\n❌ Attempting to generate MCP data with invalid calendar (should fail)..."
+    )
 
     with pytest.raises(ValueError) as exc_info:
         await generate_mcp_data_helper(invalid_calendar_entries, user_message)
 
     error_message = str(exc_info.value)
-    print(f"\n✅ Validation correctly rejected invalid calendar:")
-    print(f"Error: {error_message}")
+    logger.debug(f"\n✅ Validation correctly rejected invalid calendar:")
+    logger.debug(f"Error: {error_message}")
 
     # Verify the error message contains expected constraint violations
     assert "Calendar entries violate working constraints" in error_message
@@ -577,7 +621,7 @@ async def test_calendar_validation_rejects_invalid_entries(invalid_calendar_entr
         "Very Late Meeting" in error_message or "22:00" in error_message
     ), f"Should detect very late violation in: {error_message}"
 
-    print("✅ All expected constraint violations were detected!")
+    logger.info("✅ All expected constraint violations were detected!")
 
 
 @pytest.mark.asyncio
@@ -585,16 +629,16 @@ async def test_calendar_validation_accepts_valid_entries(valid_calendar_entries)
     """
     Test that calendar validation accepts valid entries and processing continues normally.
     """
-    print("\n" + "=" * 60)
-    print("Testing Calendar Validation: Valid Entries")
-    print("=" * 60)
+    logger.debug("\n" + "=" * 60)
+    logger.debug("Testing Calendar Validation: Valid Entries")
+    logger.debug("=" * 60)
 
     print_calendar_entries(valid_calendar_entries, "Valid Calendar Entries")
 
     # Test that generate_mcp_data succeeds with valid calendar
     user_message = "Simple test task"
 
-    print(
+    logger.debug(
         f"\n✅ Attempting to generate MCP data with valid calendar (should succeed)..."
     )
 
@@ -603,7 +647,9 @@ async def test_calendar_validation_accepts_valid_entries(valid_calendar_entries)
             valid_calendar_entries, user_message
         )
 
-        print(f"✅ Validation passed! Generated {len(initial_df)} tasks successfully")
+        logger.debug(
+            f"✅ Validation passed! Generated {len(initial_df)} tasks successfully"
+        )
 
         # Analyze and verify the result
         analysis = analyze_schedule_dataframe(initial_df, "Generated Schedule")
@@ -625,19 +671,24 @@ async def test_mcp_backend_end_to_end():
     Test the complete MCP backend workflow using the actual handler function.
     This tests the full process_message_and_attached_file flow.
     """
-    print("\n" + "=" * 50)
-    print("Testing MCP Backend End-to-End")
-    print("=" * 50)
+    logger.debug("\n" + "=" * 50)
+    logger.debug("Testing MCP Backend End-to-End")
+    logger.debug("=" * 50)
 
     # Test message for LLM tasks
     message_body = "Implement user authentication and setup database migrations"
     file_path = TEST_CONFIG["valid_calendar"]
 
-    # Run the MCP backend handler
-    print(f"📨 Processing message: '{message_body}'")
-    print(f"📁 Using calendar file: {file_path}")
+    # Read the actual file content as bytes (MCP backend expects bytes, not file path)
+    with open(file_path, "rb") as f:
+        file_content = f.read()
 
-    result = await process_message_and_attached_file(file_path, message_body)
+    # Run the MCP backend handler
+    logger.debug(f"📨 Processing message: '{message_body}'")
+    logger.debug(f"📁 Using calendar file: {file_path}")
+    logger.debug(f"📄 File content size: {len(file_content)} bytes")
+
+    result = await process_message_and_attached_file(file_content, message_body)
 
     # Verify the result structure
     assert isinstance(result, dict), "Result should be a dictionary"
@@ -647,7 +698,7 @@ async def test_mcp_backend_end_to_end():
     ], f"Unexpected status: {result.get('status')}"
 
     if result.get("status") == "success":
-        print("✅ MCP backend completed successfully!")
+        logger.info("✅ MCP backend completed successfully!")
 
         # Verify result contains expected fields
         assert "schedule" in result, "Result should contain schedule data"
@@ -657,8 +708,8 @@ async def test_mcp_backend_end_to_end():
         schedule = result["schedule"]
         calendar_entries = result["calendar_entries"]
 
-        print(f"📅 Calendar entries processed: {len(calendar_entries)}")
-        print(f"📋 Total scheduled tasks: {len(schedule)}")
+        logger.info(f"📅 Calendar entries processed: {len(calendar_entries)}")
+        logger.info(f"📋 Total scheduled tasks: {len(schedule)}")
 
         # Analyze the schedule
         existing_tasks = [t for t in schedule if t.get("Project") == "EXISTING"]
@@ -773,3 +824,60 @@ async def test_mcp_datetime_debug(valid_calendar_entries):
         raise
 
     print("🎯 MCP datetime debug test completed!")
+
+
+if __name__ == "__main__":
+    """Direct execution for non-pytest testing"""
+    import asyncio
+
+    logger.section("Factory Integration Tests")
+    logger.info(
+        "Note: This test suite is designed for pytest. For best results, run with:"
+    )
+    logger.info("  pytest tests/test_factory.py -v")
+    logger.info("  YUGA_DEBUG=true pytest tests/test_factory.py -v -s")
+
+    # Create test results tracker
+    results = create_test_results(logger)
+
+    try:
+        # Load test data
+        logger.info("Loading test calendar data...")
+        calendar_entries = load_calendar_entries(TEST_CONFIG["valid_calendar"])
+        logger.info(f"✅ Loaded {len(calendar_entries)} calendar entries")
+
+        # Run a sample factory test
+        logger.info("Running sample factory tests...")
+
+        async def run_sample_tests():
+            # Test MCP data generation
+            try:
+                logger.info("Testing MCP data generation...")
+                df = await generate_mcp_data_helper(
+                    calendar_entries=calendar_entries,
+                    user_message="Create sample tasks for testing",
+                )
+                logger.info(f"✅ Generated MCP data with {len(df)} tasks")
+                return True
+
+            except Exception as e:
+                logger.error(f"❌ MCP data generation failed: {e}")
+                return False
+
+        # Run the async test
+        success = asyncio.run(run_sample_tests())
+        results.add_result("mcp_data_generation", success)
+
+        logger.info(f"✅ Completed sample factory tests")
+
+    except Exception as e:
+        logger.error(f"Failed to run factory tests: {e}")
+        results.add_result("factory_tests_setup", False, str(e))
+
+    # Generate summary and exit with appropriate code
+    all_passed = results.summary()
+
+    if not all_passed:
+        logger.info("💡 Hint: Use 'pytest tests/test_factory.py' for full test coverage")
+
+    sys.exit(0 if all_passed else 1)

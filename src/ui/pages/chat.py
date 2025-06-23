@@ -530,6 +530,9 @@ def respond(
                             schedule = result.get("schedule", [])
                             calendar_entries = result.get("calendar_entries", [])
 
+                            # Sort the schedule by start time
+                            schedule = sorted(schedule, key=lambda x: x.get("Start"))
+
                             # Format the schedule as a table
                             if schedule:
                                 # Create table header

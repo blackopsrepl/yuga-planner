@@ -1,13 +1,11 @@
-import os, json, re
+import os, json, re, traceback, asyncio
 import gradio as gr
-import asyncio
-from typing import List, Dict, Any, Union, Generator
-from contextlib import AsyncExitStack
+
+from typing import Generator
 from datetime import datetime, date
 
 import requests
 
-from handlers.mcp_backend import process_message_and_attached_file
 from handlers.tool_call_handler import create_tool_call_handler
 from services.mcp_client import MCPClientService
 
@@ -80,13 +78,16 @@ def draw_chat_page(debug: bool = False):
             "NEBIUS_MODEL or NEBIUS_API_KEY not found in environment variables"
         )
 
-    with gr.Tab("💬 Chat"):
+    with gr.Tab("💬 Chat Agent Demo"):
         gr.Markdown(
             """
-            # 💬 Chat with Yuga Planner
+            # 💬 Chat Agent Demo
 
-            This chatbot can help you with general questions and also schedule tasks around your calendar.
-            To use scheduling features, just describe your task and optionally upload a calendar .ics file.
+            This is a chat agent demo for Yuga Planner!
+            Insert a task description to have the agent schedule it standalone or around your calendar.
+
+            If you provide a calendar file, the schedule will start from the first available time slot.
+            If you don't, the schedule will start from the current time.
             """
         )
 
@@ -106,7 +107,7 @@ def draw_chat_page(debug: bool = False):
         _tool_assembler, _tool_processor = create_tool_call_handler(_mcp_client)
 
         # Create chat interface components
-        chatbot, msg, clear, calendar_file = create_chat_interface()
+        chatbot, msg, clear, stop, calendar_file = create_chat_interface()
 
         # Create parameter controls
         (
@@ -116,8 +117,12 @@ def draw_chat_page(debug: bool = False):
             top_p_slider,
         ) = create_chatbot_parameters()
 
-        msg.submit(
-            user_message, [msg, chatbot, calendar_file], [msg, chatbot], queue=False
+        # Handle message submission
+        submit_event = msg.submit(
+            user_message,
+            [msg, chatbot, calendar_file],
+            [msg, chatbot, msg, stop],
+            queue=False,
         ).then(
             bot_response,
             [
@@ -127,25 +132,59 @@ def draw_chat_page(debug: bool = False):
                 temperature_slider,
                 top_p_slider,
             ],
-            chatbot,
+            [chatbot, msg, stop],
             show_progress=True,
         )
 
-        clear.click(lambda: [], None, chatbot, queue=False)
+        # Handle clear button
+        def clear_chat():
+            return [], gr.update(interactive=True), gr.update(visible=False)
+
+        clear.click(clear_chat, None, [chatbot, msg, stop], queue=False)
+
+        # Handle stop button
+        def stop_processing():
+            return gr.update(interactive=True), gr.update(visible=False)
+
+        stop.click(
+            stop_processing, None, [msg, stop], queue=False, cancels=[submit_event]
+        )
 
 
-def create_chat_interface() -> tuple[gr.Chatbot, gr.Textbox, gr.Button, gr.File]:
+def create_chat_interface() -> tuple[
+    gr.Chatbot, gr.Textbox, gr.Button, gr.Button, gr.File
+]:
     """Create and return the chat interface components"""
     chatbot = gr.Chatbot(type="messages")
-    msg = gr.Textbox(
-        label="Your message",
-        placeholder="Type your message here... For scheduling, describe your task and optionally upload a calendar file.",
-    )
-    calendar_file = gr.File(
-        label="📅 Calendar File (.ics)", file_types=[".ics"], visible=True
-    )
-    clear = gr.Button("Clear")
-    return chatbot, msg, clear, calendar_file
+
+    # Message input row with calendar upload on the right - improved layout
+    with gr.Row(equal_height=True):
+        msg = gr.Textbox(
+            label="Insert a task description",
+            placeholder="Ex.: Create a new EC2 instance on AWS",
+            interactive=True,
+            scale=5,  # Takes up most of the row
+            container=True,
+            lines=1,
+            max_lines=3,
+        )
+        calendar_file = gr.File(
+            label="📅 Calendar",
+            file_types=[".ics"],
+            visible=True,
+            scale=1,  # Compact size
+            height=80,  # Larger height to accommodate content
+            file_count="single",
+            container=True,
+            elem_id="calendar-upload",
+        )
+
+    # Control buttons row
+    with gr.Row():
+        clear = gr.Button("Clear", variant="secondary")
+        stop = gr.Button("Stop", variant="stop", visible=False)
+
+    return chatbot, msg, clear, stop, calendar_file
 
 
 def create_chatbot_parameters() -> tuple[gr.Textbox, gr.Slider, gr.Slider, gr.Slider]:
@@ -191,12 +230,17 @@ def user_message(message, history, calendar_file_obj):
             logger.error(f"Error reading calendar file: {e}")
             enhanced_message += f"\n\n[Calendar file upload failed: {str(e)}]"
 
-    return "", history + [{"role": "user", "content": enhanced_message}]
+    return (
+        "",  # Clear input
+        history + [{"role": "user", "content": enhanced_message}],
+        gr.update(interactive=False),  # Disable input
+        gr.update(visible=True),  # Show stop button
+    )
 
 
 def bot_response(history, system_message, max_tokens, temperature, top_p):
     if not history:
-        return history
+        return history, gr.update(interactive=True), gr.update(visible=False)
 
     # Convert messages format to tuples for the respond function
     history_tuples = []
@@ -229,7 +273,20 @@ def bot_response(history, system_message, max_tokens, temperature, top_p):
         for response_chunk in response_gen:
             updated_history = history.copy()
             updated_history[-1] = {"role": "assistant", "content": response_chunk}
-            yield updated_history
+            yield (
+                updated_history,
+                gr.update(),  # Keep input disabled during processing
+                gr.update(),  # Keep stop button visible
+            )
+
+        # Final yield to re-enable input and hide stop button
+        final_history = history.copy()
+        final_history[-1] = {"role": "assistant", "content": response_chunk}
+        yield (
+            final_history,
+            gr.update(interactive=True),  # Re-enable input
+            gr.update(visible=False),  # Hide stop button
+        )
 
     except Exception as e:
         logger.error(f"Error in bot_response: {e}")
@@ -238,7 +295,11 @@ def bot_response(history, system_message, max_tokens, temperature, top_p):
         logger.error(f"Full traceback: {traceback.format_exc()}")
         error_history = history.copy()
         error_history[-1] = {"role": "assistant", "content": f"Error: {str(e)}"}
-        yield error_history
+        yield (
+            error_history,
+            gr.update(interactive=True),  # Re-enable input on error
+            gr.update(visible=False),  # Hide stop button on error
+        )
 
 
 def respond(
@@ -352,11 +413,14 @@ def respond(
                         if "choices" in chunk and len(chunk["choices"]) > 0:
                             delta = chunk["choices"][0].get("delta", {})
                             content = delta.get("content", "")
+
                             if content:
                                 response_text += content
+
                                 # For scheduling requests, include essential logs inline
                                 if is_scheduling_request:
                                     session_logs = get_session_logs()
+
                                     if session_logs:
                                         # Show only new logs since last yield
                                         latest_logs = (
@@ -367,9 +431,12 @@ def respond(
                                         logs_text = "\n".join(
                                             f"  {log}" for log in latest_logs
                                         )
+
                                         yield response_text + f"\n\n{logs_text}"
+
                                     else:
                                         yield response_text
+
                                 else:
                                     yield response_text
 
@@ -414,16 +481,25 @@ def respond(
                 try:
                     # Extract task description from message
                     task_description = message
-                    calendar_content = "none"
+                    calendar_content = ""  # Always start with empty calendar
 
                     # Extract calendar data if available
                     calendar_match = re.search(r"\[CALENDAR_DATA:([^\]]+)\]", message)
+
                     if calendar_match:
                         calendar_content = calendar_match.group(1)
+                        logger.info("Calendar data found and extracted")
+
+                    else:
+                        # If no calendar data found, proceed with empty calendar
+                        logger.info(
+                            "No calendar data found, proceeding with empty calendar - tool will still be called"
+                        )
 
                     # Show essential task processing logs inline
                     session_logs = get_session_logs()
                     processing_status = ""
+
                     if session_logs:
                         latest_logs = (
                             session_logs[-2:] if len(session_logs) > 2 else session_logs
@@ -437,9 +513,6 @@ def respond(
                     logger.info("About to call MCP scheduling tool directly")
 
                     # Add timeout to prevent hanging
-                    import asyncio
-                    import concurrent.futures
-
                     def call_with_timeout():
                         try:
                             return loop.run_until_complete(
@@ -658,19 +731,19 @@ def respond(
                             else:
                                 tool_response = f"""
 
-📅 **Schedule Generated Successfully!**
+                                📅 **Schedule Generated Successfully!**
 
-**Task:** {task_description}
-**Calendar Events Processed:** {len(calendar_entries)}
-**Total Scheduled Items:** {len(schedule)}
+                                **Task:** {task_description}
+                                **Calendar Events Processed:** {len(calendar_entries)}
+                                **Total Scheduled Items:** {len(schedule)}
 
-⚠️ **No schedule items to display** - This may indicate the task was completed or no scheduling was needed.
+                                ⚠️ **No schedule items to display** - This may indicate the task was completed or no scheduling was needed.
 
-**Raw Result:**
-```json
-{safe_json_dumps(result, indent=2)[:1000]}
-```
-"""
+                                **Raw Result:**
+                                ```json
+                                {safe_json_dumps(result, indent=2)[:1000]}
+                                ```
+                                """
 
                             response_text += tool_response
                             logger.info("Added success message with table to response")
@@ -688,7 +761,6 @@ def respond(
 
                 except Exception as e:
                     logger.error(f"Direct scheduling call failed: {e}")
-                    import traceback
 
                     logger.error(f"Full traceback: {traceback.format_exc()}")
                     tool_response = f"\n\n❌ **Scheduling failed:** {str(e)}"
@@ -702,7 +774,6 @@ def respond(
 
     except Exception as e:
         logger.error(f"Error in chat response: {e}")
-        import traceback
 
         logger.error(f"Full traceback: {traceback.format_exc()}")
         yield f"Error: {str(e)}"

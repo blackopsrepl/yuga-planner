@@ -84,10 +84,12 @@ def draw_chat_page(debug: bool = False):
             # 💬 Chat Agent Demo
 
             This is a chat agent demo for Yuga Planner!
-            Insert a task description to have the agent schedule it standalone or around your calendar.
 
-            If you provide a calendar file, the schedule will start from the first available time slot.
-            If you don't, the schedule will start from the current time.
+            Insert a task description to have the agent schedule it standalone or around your existing calendar.
+
+            If you provide a .ics file, the schedule will start from **the first occupied time slot in your calendar file**.
+
+            If you don't, the schedule will start from **next monday**.
             """
         )
 
@@ -213,8 +215,10 @@ def create_chatbot_parameters() -> tuple[gr.Textbox, gr.Slider, gr.Slider, gr.Sl
 def user_message(message, history, calendar_file_obj):
     # Handle calendar file upload
     enhanced_message = message
+
+    # Use provided calendar file or default to empty.ics
     if calendar_file_obj is not None:
-        # Read and encode the calendar file
+        # Read and encode the uploaded calendar file
         try:
             import base64
 
@@ -229,6 +233,21 @@ def user_message(message, history, calendar_file_obj):
         except Exception as e:
             logger.error(f"Error reading calendar file: {e}")
             enhanced_message += f"\n\n[Calendar file upload failed: {str(e)}]"
+    else:
+        # Use empty.ics as default when no calendar is provided
+        try:
+            import base64
+
+            empty_calendar_path = "tests/data/empty.ics"
+            with open(empty_calendar_path, "rb") as f:
+                file_content = f.read()
+
+            encoded_content = base64.b64encode(file_content).decode("utf-8")
+            enhanced_message += f"\n\n[Default empty calendar used]"
+            enhanced_message += f"\n[CALENDAR_DATA:{encoded_content}]"
+        except Exception as e:
+            logger.error(f"Error reading default empty calendar: {e}")
+            enhanced_message += f"\n\n[Default calendar load failed: {str(e)}]"
 
     return (
         "",  # Clear input

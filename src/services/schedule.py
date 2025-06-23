@@ -126,6 +126,15 @@ class ScheduleService:
                     base_date = earliest_date
                     logger.info(f"🗓️ Determined base_date for schedule: {base_date}")
 
+            # If no base_date found from pinned tasks, use next Monday as default
+            if base_date is None:
+                from factory.data.generators import earliest_monday_on_or_after
+
+                base_date = earliest_monday_on_or_after(date.today())
+                logger.info(
+                    f"🗓️ No pinned tasks found, using next Monday as base_date: {base_date}"
+                )
+
             # Convert DataFrame to tasks
             tasks = DataService.convert_dataframe_to_tasks(task_df, base_date)
 

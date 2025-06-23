@@ -9,6 +9,7 @@ from .schedule import ScheduleService
 from .data import DataService
 from .mock_projects import MockProjectService
 from .state import StateService
+from .mcp_client import MCPClientService
 
 __all__ = [
     "LoggingService",
@@ -16,4 +17,5 @@ __all__ = [
     "DataService",
     "MockProjectService",
     "StateService",
+    "MCPClientService",
 ]

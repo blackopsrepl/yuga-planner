@@ -1,6 +1,12 @@
 import os, warnings
 from dataclasses import dataclass
 
+# Load secrets if environment variables are not set
+from utils.load_secrets import load_secrets
+
+if not os.getenv("NEBIUS_API_KEY") or not os.getenv("NEBIUS_MODEL"):
+    load_secrets("tests/secrets/creds.py")
+
 # =========================
 #        MOCK PROJECTS
 # =========================

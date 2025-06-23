@@ -16,6 +16,12 @@ from .mcp_backend import (
     process_message_and_attached_file,
 )
 
+from .tool_call_handler import (
+    ToolCallAssembler,
+    ToolCallProcessor,
+    create_tool_call_handler,
+)
+
 __all__ = [
     "load_data",
     "show_solved",
@@ -23,4 +29,7 @@ __all__ = [
     "auto_poll",
     "show_mock_project_content",
     "process_message_and_attached_file",
+    "ToolCallAssembler",
+    "ToolCallProcessor",
+    "create_tool_call_handler",
 ]

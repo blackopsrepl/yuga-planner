@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [0.6.1](///compare/v0.6.0...v0.6.1) (2025-06-23)
+
+
+### Features
+
+* improve ui ee5de8e
+
 ## [0.6.0](///compare/v0.5.5...v0.6.0) (2025-06-23)
 
 

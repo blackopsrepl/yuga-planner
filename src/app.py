@@ -9,7 +9,6 @@ logger = get_logger(__name__)
 
 from handlers.mcp_backend import process_message_and_attached_file
 from ui.pages.chat import draw_chat_page
-from ui.pages.mcp_info import draw_info_page
 
 
 # Store last chat message and file in global variables (for demo purposes)
@@ -46,7 +45,6 @@ def app(debug: bool = False):
         )
 
         draw_chat_page(debug)
-        draw_info_page(debug)
 
         # Register the MCP tool as an API endpoint
         gr.api(process_message_and_attached_file)

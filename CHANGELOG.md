@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [0.6.4](///compare/v0.6.3...v0.6.4) (2025-06-24)
+
+
+### Features
+
+* **deploy:** add helm chart ae122c6
+* **deploy:** add kubernetes manifest f870b34
+* **deploy:** add whimsical Makefile rice 186edf4
+
+
+### Bug Fixes
+
+* **deploy:** fix github workflow permissions 2d2ce73
+
 ## [0.6.3](///compare/v0.6.2...v0.6.3) (2025-06-24)
 
 

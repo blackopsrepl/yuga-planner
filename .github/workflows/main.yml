@@ -1,0 +1,127 @@
+name: Build and Deploy Yuga Planner
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout the repository with full history to access tags
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Set up Docker Buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Log in to GHCR
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Determine if this is a tag or commit
+      - name: Set build type and tags
+        id: build_info
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            # This is a tag push
+            VERSION=${GITHUB_REF#refs/tags/v}
+            LATEST_TAG=$(git tag --sort=-version:refname | head -n 1 | sed 's/^v//')
+            IS_LATEST_TAG=$([[ "$VERSION" == "$LATEST_TAG" ]] && echo "true" || echo "false")
+            echo "build_type=release" >> $GITHUB_OUTPUT
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "is_latest_tag=$IS_LATEST_TAG" >> $GITHUB_OUTPUT
+            echo "🏷️ Building RELEASE version: $VERSION (latest: $IS_LATEST_TAG)"
+          else
+            # This is a regular commit
+            COMMIT_SHA=${GITHUB_SHA::7}
+            echo "build_type=test" >> $GITHUB_OUTPUT
+            echo "commit_sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
+            echo "🔧 Building TEST version: $COMMIT_SHA"
+          fi
+
+      # Build and push Docker image for RELEASES (tag pushes)
+      - name: Build and push release image
+        if: steps.build_info.outputs.build_type == 'release'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/yuga-planner:${{ steps.build_info.outputs.version }}
+            ${{ steps.build_info.outputs.is_latest_tag == 'true' && format('ghcr.io/{0}/yuga-planner:latest', github.repository_owner) || '' }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.build_info.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      # Build and push Docker image for TEST (regular commits)
+      - name: Build and push test image
+        if: steps.build_info.outputs.build_type == 'test'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/yuga-planner-test:latest
+            ghcr.io/${{ github.repository_owner }}/yuga-planner-test:${{ steps.build_info.outputs.commit_sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=test-${{ steps.build_info.outputs.commit_sha }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      # Deploy to HuggingFace (ONLY for tag releases)
+      - name: Setup Python for HF deployment
+        if: steps.build_info.outputs.build_type == 'release'
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+
+
+      - name: Deploy to HuggingFace Space
+        if: steps.build_info.outputs.build_type == 'release'
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_USER: ${{ secrets.HF_USER }}
+        run: |
+          # Configure git for HF
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+          # Add HF remote with authentication and push directly (overwrites)
+          git remote add hf https://${HF_USER}:${HF_TOKEN}@huggingface.co/spaces/blackopsrepl/yuga-planner
+          git push --force hf HEAD:main
+
+          echo "✅ Successfully deployed v${{ steps.build_info.outputs.version }} to HuggingFace Space!"
+
+      # Summary
+      - name: Build Summary
+        run: |
+          if [[ "${{ steps.build_info.outputs.build_type }}" == "release" ]]; then
+            echo "📦 RELEASE BUILD COMPLETED"
+            echo "🏷️ Version: ${{ steps.build_info.outputs.version }}"
+            echo "🐳 Docker: ghcr.io/${{ github.repository_owner }}/yuga-planner:${{ steps.build_info.outputs.version }}"
+            if [[ "${{ steps.build_info.outputs.is_latest_tag }}" == "true" ]]; then
+              echo "🏆 Also tagged as: ghcr.io/${{ github.repository_owner }}/yuga-planner:latest"
+            fi
+            echo "🤗 Deployed to HuggingFace Space"
+          else
+            echo "🔧 TEST BUILD COMPLETED"
+            echo "🏷️ Commit: ${{ steps.build_info.outputs.commit_sha }}"
+            echo "🐳 Docker: ghcr.io/${{ github.repository_owner }}/yuga-planner-test:latest"
+            echo "🐳 Docker: ghcr.io/${{ github.repository_owner }}/yuga-planner-test:${{ steps.build_info.outputs.commit_sha }}"
+            echo "ℹ️ No HuggingFace deployment (test build only)"
+          fi

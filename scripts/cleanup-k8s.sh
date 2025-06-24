@@ -1,20 +1,29 @@
 #!/bin/bash
 set -e
 
-# Yuga Planner Kubernetes Cleanup Script
-# This script removes all Kubernetes resources created by the deployment
+# Colors and formatting
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+RESET='\033[0m'
 
-echo "🧹 Cleaning up Yuga Planner Kubernetes deployment..."
+# Yuga Planner Kubernetes Cleanup Script
+echo -e "${BOLD}🧹 Yuga Planner - Kubernetes Cleanup${RESET}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 
 # Check if kubectl is available
 if ! command -v kubectl &> /dev/null; then
-    echo "❌ Error: kubectl is required but not installed."
+    echo -e "${RED}❌ Error: kubectl is required but not installed${RESET}"
     exit 1
 fi
 
 # Check if we're in the correct directory (project root)
 if [ ! -f "deploy/kubernetes.yaml" ]; then
-    echo "❌ Error: kubernetes.yaml not found. Please run this script from the project root."
+    echo -e "${RED}❌ Error: kubernetes.yaml not found${RESET}"
+    echo -e "${YELLOW}💡 Please run this script from the project root${RESET}"
     exit 1
 fi
 
@@ -39,7 +48,7 @@ check_resources() {
     fi
 
     if [ "$resource_exists" = false ]; then
-        echo "ℹ️  No Yuga Planner resources found in the current namespace."
+        echo -e "${BLUE}ℹ️  No Yuga Planner resources found in the current namespace${RESET}"
         return 1
     fi
 
@@ -47,37 +56,43 @@ check_resources() {
 }
 
 # Check if any resources exist
+echo -e "${BLUE}🔍 Scanning for Yuga Planner resources...${RESET}"
 if ! check_resources; then
-    echo "✅ Nothing to clean up."
+    echo -e "${GREEN}✅ Nothing to clean up${RESET}"
     exit 0
 fi
 
 # Show what will be deleted
-echo "🔍 Found the following Yuga Planner resources:"
+echo -e "${YELLOW}📋 Found the following Yuga Planner resources:${RESET}"
 kubectl get deployment,service,secret,configmap -l app=yuga-planner 2>/dev/null || true
 
 # Confirm deletion
-read -p "❓ Are you sure you want to delete these resources? (y/N): " -n 1 -r
+echo ""
+echo -e "${BOLD}⚠️  Warning: This will permanently delete all Yuga Planner resources${RESET}"
+read -p "$(echo -e "${YELLOW}❓ Are you sure you want to continue? (y/N): ${RESET}")" -n 1 -r
 echo
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "❌ Cleanup cancelled."
+    echo -e "${BLUE}❌ Cleanup cancelled${RESET}"
     exit 0
 fi
 
-echo "🗑️  Deleting Kubernetes resources..."
+echo -e "${RED}🗑️  Deleting Kubernetes resources...${RESET}"
 
 # Delete resources by label selector (safer approach)
-echo "  • Deleting deployment..."
+echo -e "  ${CYAN}• Deleting deployment...${RESET}"
 kubectl delete deployment -l app=yuga-planner --ignore-not-found=true
 
-echo "  • Deleting service..."
+echo -e "  ${CYAN}• Deleting service...${RESET}"
 kubectl delete service -l app=yuga-planner --ignore-not-found=true
 
-echo "  • Deleting secrets..."
+echo -e "  ${CYAN}• Deleting secrets...${RESET}"
 kubectl delete secret -l app=yuga-planner --ignore-not-found=true
 
-echo "  • Deleting configmaps..."
+echo -e "  ${CYAN}• Deleting configmaps...${RESET}"
 kubectl delete configmap -l app=yuga-planner --ignore-not-found=true
 
-echo "✅ Cleanup complete!"
-echo "🔍 Verify cleanup: kubectl get all -l app=yuga-planner"
+echo ""
+echo -e "${GREEN}✅ Cleanup complete!${RESET}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+echo -e "${BOLD}🔍 Verification:${RESET}"
+echo -e "  Check remaining: ${GREEN}kubectl get all -l app=yuga-planner${RESET}"

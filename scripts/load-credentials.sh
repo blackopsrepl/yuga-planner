@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# Colors and formatting
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+RESET='\033[0m'
+
 # Yuga Planner Credential Loading Script
 # This script loads credentials from environment variables or creds.py
 
@@ -8,7 +17,7 @@ load_credentials() {
     local creds_file="tests/secrets/creds.py"
 
     if [ -f "$creds_file" ]; then
-        echo "📋 Loading credentials from $creds_file..."
+        echo -e "${BLUE}📋 Loading credentials from $creds_file...${RESET}"
 
         # Extract credentials from creds.py if environment variables are not set
         if [ -z "$NEBIUS_API_KEY" ]; then
@@ -65,26 +74,36 @@ print(creds.HF_TOKEN)
 " 2>/dev/null || echo "")
         fi
     else
-        echo "⚠️  Warning: $creds_file not found"
+        echo -e "${YELLOW}⚠️  Warning: $creds_file not found${RESET}"
+        echo -e "${CYAN}💡 Run '${GREEN}make setup-secrets${CYAN}' to create the template${RESET}"
     fi
 }
 
 # Function to check and validate required credentials
 check_credentials() {
-    echo "🔍 Checking for credentials..."
+    echo -e "${CYAN}🔍 Validating credentials...${RESET}"
 
     local missing_vars=()
     local required_vars=("NEBIUS_API_KEY" "NEBIUS_MODEL" "MODAL_TOKEN_ID" "MODAL_TOKEN_SECRET" "HF_MODEL" "HF_TOKEN")
+    local found_vars=()
 
+    # First check what's already available
     for var in "${required_vars[@]}"; do
         if [ -z "${!var}" ]; then
             missing_vars+=("$var")
+        else
+            found_vars+=("$var")
         fi
     done
 
+    # Show what we found
+    if [ ${#found_vars[@]} -gt 0 ]; then
+        echo -e "${GREEN}✅ Found environment variables: ${found_vars[*]}${RESET}"
+    fi
+
     if [ ${#missing_vars[@]} -gt 0 ]; then
-        echo "📂 Missing environment variables: ${missing_vars[*]}"
-        echo "🔄 Attempting to load from creds.py..."
+        echo -e "${YELLOW}📂 Missing from environment: ${missing_vars[*]}${RESET}"
+        echo -e "${BLUE}🔄 Attempting to load from creds.py...${RESET}"
         load_credentials
 
         # Check again after loading from creds.py
@@ -96,18 +115,26 @@ check_credentials() {
         done
 
         if [ ${#missing_vars[@]} -gt 0 ]; then
-            echo "❌ Error: The following required environment variables are not set: ${missing_vars[*]}"
-            echo "💡 Please set them in your environment or ensure tests/secrets/creds.py exists with the required values."
+            echo ""
+            echo -e "${RED}❌ Error: Missing required credentials: ${missing_vars[*]}${RESET}"
+            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+            echo -e "${BOLD}💡 Setup Instructions:${RESET}"
+            echo -e "  1. Run: ${GREEN}make setup-secrets${RESET}"
+            echo -e "  2. Edit: ${CYAN}tests/secrets/creds.py${RESET}"
+            echo -e "  3. Add your API credentials"
+            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
             return 1
         fi
     fi
 
-    echo "✅ All credentials found"
+    echo -e "${GREEN}✅ All credentials validated successfully${RESET}"
     return 0
 }
 
 # Main execution when script is run directly
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    echo -e "${BOLD}🔐 Yuga Planner - Credential Validator${RESET}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     check_credentials
     exit $?
 fi

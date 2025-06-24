@@ -1,4 +1,4 @@
-.PHONY: help venv install run test lint format clean setup-secrets
+.PHONY: help venv install run test lint format clean setup-secrets deploy-k8s
 
 PYTHON=python
 PIP=pip
@@ -15,6 +15,7 @@ help:
 	@echo "  lint            Run pre-commit hooks (includes black, yaml, gitleaks)"
 	@echo "  format          Format code with black"
 	@echo "  setup-secrets   Copy and edit secrets template for local dev"
+	@echo "  deploy-k8s      Deploy application to Kubernetes"
 	@echo "  clean           Remove Python cache and virtual environment"
 
 venv:
@@ -40,6 +41,9 @@ format:
 setup-secrets:
 	cp -n tests/secrets/nebius_secrets.py.template tests/secrets/cred.py; \
 	echo "Edit tests/secrets/cred.py to add your own API credentials."
+
+deploy-k8s:
+	./scripts/deploy-k8s.sh
 
 clean:
 	rm -rf $(VENV) __pycache__ */__pycache__ .pytest_cache .mypy_cache .coverage .hypothesis

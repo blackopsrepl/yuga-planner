@@ -1,0 +1,153 @@
+# Kubernetes manifest for Yuga Planner
+# Note: This file contains environment variable placeholders that need to be substituted before deployment
+# Use the provided deploy script or substitute manually: envsubst < kubernetes.yaml | kubectl apply -f -
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: yuga-planner-secrets
+  labels:
+    app: yuga-planner
+type: Opaque
+stringData:
+  # These values will be populated from environment variables during deployment
+  NEBIUS_API_KEY: "${NEBIUS_API_KEY}"
+  NEBIUS_MODEL: "${NEBIUS_MODEL}"
+  MODAL_TOKEN_ID: "${MODAL_TOKEN_ID}"
+  MODAL_TOKEN_SECRET: "${MODAL_TOKEN_SECRET}"
+  HF_MODEL: "${HF_MODEL}"
+  HF_TOKEN: "${HF_TOKEN}"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: yuga-planner-config
+  labels:
+    app: yuga-planner
+data:
+  JAVA_HOME: "/usr/lib/jvm/temurin-21-jdk-amd64"
+  PATH: "/usr/lib/jvm/temurin-21-jdk-amd64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: yuga-planner
+  labels:
+    app: yuga-planner
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: yuga-planner
+  template:
+    metadata:
+      labels:
+        app: yuga-planner
+    spec:
+      containers:
+      - name: yuga-planner
+        image: ghcr.io/blackopsrepl/yuga-planner-test:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 7860
+          name: http
+          protocol: TCP
+        env:
+        - name: JAVA_HOME
+          valueFrom:
+            configMapKeyRef:
+              name: yuga-planner-config
+              key: JAVA_HOME
+        - name: PATH
+          valueFrom:
+            configMapKeyRef:
+              name: yuga-planner-config
+              key: PATH
+        - name: NEBIUS_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: yuga-planner-secrets
+              key: NEBIUS_API_KEY
+        - name: NEBIUS_MODEL
+          valueFrom:
+            secretKeyRef:
+              name: yuga-planner-secrets
+              key: NEBIUS_MODEL
+        - name: MODAL_TOKEN_ID
+          valueFrom:
+            secretKeyRef:
+              name: yuga-planner-secrets
+              key: MODAL_TOKEN_ID
+        - name: MODAL_TOKEN_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: yuga-planner-secrets
+              key: MODAL_TOKEN_SECRET
+        - name: HF_MODEL
+          valueFrom:
+            secretKeyRef:
+              name: yuga-planner-secrets
+              key: HF_MODEL
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: yuga-planner-secrets
+              key: HF_TOKEN
+        command: ["python", "src/app.py"]
+        args:
+        - "--server-name"
+        - "0.0.0.0"
+        - "--server-port"
+        - "7860"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 7860
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 7860
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+            - ALL
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: yuga-planner-service
+  labels:
+    app: yuga-planner
+spec:
+  type: NodePort
+  ports:
+  - port: 80
+    targetPort: 7860
+    nodePort: 30860
+    protocol: TCP
+    name: http
+  selector:
+    app: yuga-planner

@@ -1189,9 +1189,14 @@ def respond(
                     logger.info("Added exception message to response")
                     yield (response_text, constraint_analysis_text)
 
-        # Always yield final response
-        logger.info(f"Final yield: response length {len(response_text)}")
-        yield (response_text, constraint_analysis_text)
+        # Only yield final response if no scheduling was attempted
+        if not completed_tool_calls and not is_scheduling_request:
+            logger.info(
+                f"Final yield for non-scheduling request: response length {len(response_text)}"
+            )
+            yield (response_text, constraint_analysis_text)
+        else:
+            logger.info("Skipping final yield - scheduling results already yielded")
 
     except Exception as e:
         logger.error(f"Error in chat response: {e}")

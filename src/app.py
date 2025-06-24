@@ -2,6 +2,7 @@ import os, argparse
 import gradio as gr
 
 from utils.logging_config import setup_logging, get_logger
+from utils.version import __version__
 
 # Initialize logging early - will be reconfigured based on debug mode
 setup_logging()
@@ -45,6 +46,16 @@ def app(debug: bool = False):
         )
 
         draw_chat_page(debug)
+
+        # Version footer
+        gr.Markdown(
+            f"""
+            <div style="text-align: center; margin-top: 2rem; padding: 1rem; color: #666; font-size: 0.8rem;">
+                Yuga Planner v{__version__}
+            </div>
+            """,
+            elem_classes=["version-footer"],
+        )
 
         # Register the MCP tool as an API endpoint
         gr.api(process_message_and_attached_file)

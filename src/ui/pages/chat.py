@@ -8,6 +8,8 @@ import requests
 
 from handlers.tool_call_handler import create_tool_call_handler
 from services.mcp_client import MCPClientService
+from services.constraint_analyzer import ConstraintAnalyzerService
+from constraint_solvers.timetable.domain import EmployeeSchedule
 
 from utils.load_secrets import load_secrets
 
@@ -69,6 +71,313 @@ def safe_json_dumps(obj, **kwargs):
         )
 
 
+def format_heatmap_data(heatmap_data: dict) -> str:
+    """Format heatmap data for display in the chat interface"""
+    if not heatmap_data:
+        return "🟢 **No constraint violations detected** - All entities are performing well!"
+
+    formatted_output = "\n\n## 🔥 **Constraint Violation Heatmap**\n\n"
+    formatted_output += "This heatmap shows which tasks and employees have the most constraint violations:\n\n"
+
+    # Separate tasks and employees
+    task_violations = {}
+    employee_violations = {}
+
+    for entity, data in heatmap_data.items():
+        entity_name = str(entity)
+        if hasattr(entity, "description"):  # This is a task
+            task_violations[entity] = data
+        elif hasattr(entity, "name"):  # This is an employee
+            employee_violations[entity] = data
+        else:
+            # Fallback - try to determine by content
+            if "Task" in entity_name or "task" in entity_name.lower():
+                task_violations[entity] = data
+            else:
+                employee_violations[entity] = data
+
+    # Sort by severity (hard score first, then soft score)
+    def get_severity(item):
+        _, data = item
+        return (abs(data["hard_score"]), abs(data["soft_score"]))
+
+    # Display task violations
+    if task_violations:
+        sorted_tasks = sorted(task_violations.items(), key=get_severity, reverse=True)
+        formatted_output += "### 📋 **Task Constraint Violations**\n\n"
+
+        for i, (task, data) in enumerate(
+            sorted_tasks[:10]
+        ):  # Show top 10 most problematic
+            # Get severity indicators
+            severity = (
+                "🔴"
+                if data["hard_score"] < -5
+                else "🟡"
+                if data["hard_score"] < 0
+                else "🟢"
+            )
+
+            task_name = getattr(task, "description", str(task))[:50]
+            if len(getattr(task, "description", str(task))) > 50:
+                task_name += "..."
+
+            formatted_output += f"{severity} **{task_name}**\n"
+            formatted_output += f"   - Hard Score: {data['hard_score']} | Soft Score: {data['soft_score']}\n"
+
+            # Show constraint matches
+            if data["constraint_matches"]:
+                formatted_output += f"   - Violations: "
+                constraint_names = [
+                    match["constraint_name"] for match in data["constraint_matches"][:3]
+                ]
+                formatted_output += ", ".join(constraint_names)
+                if len(data["constraint_matches"]) > 3:
+                    formatted_output += (
+                        f" (+{len(data['constraint_matches']) - 3} more)"
+                    )
+                formatted_output += "\n"
+            formatted_output += "\n"
+
+    # Display employee violations
+    if employee_violations:
+        sorted_employees = sorted(
+            employee_violations.items(), key=get_severity, reverse=True
+        )
+        formatted_output += "### 👥 **Employee Constraint Violations**\n\n"
+
+        for employee, data in sorted_employees:
+            # Get severity indicators
+            severity = (
+                "🔴"
+                if data["hard_score"] < -5
+                else "🟡"
+                if data["hard_score"] < 0
+                else "🟢"
+            )
+
+            employee_name = getattr(employee, "name", str(employee))
+            formatted_output += f"{severity} **{employee_name}**\n"
+            formatted_output += f"   - Hard Score: {data['hard_score']} | Soft Score: {data['soft_score']}\n"
+
+            # Show constraint matches
+            if data["constraint_matches"]:
+                formatted_output += f"   - Violations: "
+                constraint_names = [
+                    match["constraint_name"] for match in data["constraint_matches"][:3]
+                ]
+                formatted_output += ", ".join(constraint_names)
+                if len(data["constraint_matches"]) > 3:
+                    formatted_output += (
+                        f" (+{len(data['constraint_matches']) - 3} more)"
+                    )
+                formatted_output += "\n"
+            formatted_output += "\n"
+
+    # Add summary
+    total_entities = len(heatmap_data)
+    high_severity = sum(1 for data in heatmap_data.values() if data["hard_score"] < -5)
+    medium_severity = sum(
+        1 for data in heatmap_data.values() if -5 <= data["hard_score"] < 0
+    )
+
+    formatted_output += f"### 📊 **Violation Summary**\n\n"
+    formatted_output += f"- 🔴 **High Severity:** {high_severity} entities\n"
+    formatted_output += f"- 🟡 **Medium Severity:** {medium_severity} entities\n"
+    formatted_output += f"- 📈 **Total Affected:** {total_entities} entities\n"
+
+    return formatted_output
+
+
+def create_constraint_analysis(schedule_dict: dict) -> str:
+    """Create a comprehensive constraint analysis including heatmap for the schedule"""
+    try:
+        # Try to reconstruct the EmployeeSchedule from the result dictionary
+        from constraint_solvers.timetable.domain import (
+            EmployeeSchedule,
+            Employee,
+            Task,
+            ScheduleInfo,
+        )
+
+        # Check if we have the necessary data
+        if not isinstance(schedule_dict, dict):
+            return ""
+
+        # Look for schedule data in different possible locations
+        schedule_data = None
+        if "schedule" in schedule_dict:
+            schedule_data = schedule_dict["schedule"]
+        elif isinstance(schedule_dict, list):
+            schedule_data = schedule_dict
+        else:
+            # Try to find schedule-like data
+            for key, value in schedule_dict.items():
+                if isinstance(value, list) and len(value) > 0:
+                    if any(
+                        "Task" in str(item) or "Employee" in str(item)
+                        for item in value[:3]
+                    ):
+                        schedule_data = value
+                        break
+
+        if not schedule_data:
+            logger.info("No schedule data found for constraint analysis")
+            return ""
+
+        # For now, since we don't have the full EmployeeSchedule object,
+        # we'll create a simplified analysis based on the schedule data
+        analysis_output = "\n\n## 🧠 **Constraint Analysis**\n\n"
+
+        # Analyze the schedule data for potential issues
+        total_tasks = len(schedule_data)
+        pinned_tasks = sum(1 for item in schedule_data if item.get("Pinned", False))
+        unavailable_conflicts = sum(
+            1 for item in schedule_data if item.get("Unavailable", False)
+        )
+        undesired_assignments = sum(
+            1 for item in schedule_data if item.get("Undesired", False)
+        )
+        desired_assignments = sum(
+            1 for item in schedule_data if item.get("Desired", False)
+        )
+
+        # Calculate constraint health score
+        if total_tasks > 0:
+            health_score = max(
+                0, 100 - (unavailable_conflicts * 30) - (undesired_assignments * 10)
+            )
+
+            if health_score >= 90:
+                status_icon = "🟢"
+                status_text = "Excellent"
+            elif health_score >= 70:
+                status_icon = "🟡"
+                status_text = "Good"
+            elif health_score >= 50:
+                status_icon = "🟠"
+                status_text = "Fair"
+            else:
+                status_icon = "🔴"
+                status_text = "Poor"
+
+            analysis_output += f"### {status_icon} **Schedule Health: {status_text} ({health_score}/100)**\n\n"
+
+            # Only show constraint-specific details if there are violations or issues
+            has_violations = unavailable_conflicts > 0 or undesired_assignments > 0
+            has_preferences = desired_assignments > 0
+
+            if has_violations or has_preferences:
+                analysis_output += f"**🎯 Constraint Details:**\n"
+                if unavailable_conflicts > 0:
+                    analysis_output += (
+                        f"- ❌ Unavailable Conflicts: {unavailable_conflicts}\n"
+                    )
+                if undesired_assignments > 0:
+                    analysis_output += (
+                        f"- 😐 Undesired Assignments: {undesired_assignments}\n"
+                    )
+                if desired_assignments > 0:
+                    analysis_output += (
+                        f"- ✅ Desired Assignments: {desired_assignments}\n"
+                    )
+                analysis_output += "\n"
+
+            # Only show issues and suggestions if there are actual problems
+            if has_violations:
+                if unavailable_conflicts > 0:
+                    analysis_output += f"⚠️ **Hard Constraint Violations:** {unavailable_conflicts} tasks scheduled when employees are unavailable\n\n"
+
+                if undesired_assignments > 0:
+                    analysis_output += f"⚠️ **Soft Constraint Violations:** {undesired_assignments} tasks scheduled on undesired dates\n\n"
+
+                # Suggestions only when there are actual problems
+                suggestions = []
+                if unavailable_conflicts > 0:
+                    suggestions.append(
+                        "🔧 **Reschedule unavailable assignments** - Move tasks to available time slots"
+                    )
+                if undesired_assignments > 5:
+                    suggestions.append(
+                        "🔧 **Optimize employee preferences** - Consider redistributing tasks on undesired dates"
+                    )
+                elif undesired_assignments > 0:
+                    suggestions.append(
+                        "🔧 **Minor optimization** - Consider adjusting a few undesired assignments"
+                    )
+
+                if suggestions:
+                    analysis_output += f"### 💡 **Improvement Suggestions**\n\n"
+                    for suggestion in suggestions:
+                        analysis_output += f"- {suggestion}\n"
+                    analysis_output += "\n"
+            else:
+                # Perfect schedule - just acknowledge it briefly
+                analysis_output += f"✨ **Perfect constraint satisfaction** - No conflicts or violations detected!\n\n"
+
+            # Employee workload analysis - only show if multiple employees or workload issues exist
+            employee_workload = {}
+            for item in schedule_data:
+                employee = item.get("Employee", "Unassigned")
+                if employee not in employee_workload:
+                    employee_workload[employee] = {
+                        "tasks": 0,
+                        "hours": 0,
+                        "unavailable": 0,
+                        "undesired": 0,
+                        "desired": 0,
+                    }
+                employee_workload[employee]["tasks"] += 1
+                employee_workload[employee]["hours"] += item.get("Duration (hours)", 0)
+                if item.get("Unavailable", False):
+                    employee_workload[employee]["unavailable"] += 1
+                if item.get("Undesired", False):
+                    employee_workload[employee]["undesired"] += 1
+                if item.get("Desired", False):
+                    employee_workload[employee]["desired"] += 1
+
+            # Only show workload analysis if there are multiple employees OR workload issues
+            active_employees = [
+                emp for emp in employee_workload.keys() if emp != "Unassigned"
+            ]
+            has_workload_issues = any(
+                workload["unavailable"] > 0 or workload["undesired"] > 0
+                for workload in employee_workload.values()
+            )
+
+            if len(active_employees) > 1 or has_workload_issues:
+                analysis_output += f"### 👥 **Employee Workload Analysis**\n\n"
+
+                for employee, workload in sorted(
+                    employee_workload.items(), key=lambda x: x[1]["hours"], reverse=True
+                ):
+                    if employee != "Unassigned":
+                        violation_score = (
+                            workload["unavailable"] * 2 + workload["undesired"]
+                        )
+                        if violation_score >= 3:
+                            stress_icon = "🔴"
+                        elif violation_score >= 1:
+                            stress_icon = "🟡"
+                        else:
+                            stress_icon = "🟢"
+
+                        analysis_output += f"{stress_icon} **{employee}**: {workload['tasks']} tasks, {workload['hours']}h"
+                        if workload["unavailable"] > 0 or workload["undesired"] > 0:
+                            analysis_output += f" (⚠️ {workload['unavailable']} unavailable, {workload['undesired']} undesired)"
+                        analysis_output += "\n"
+                analysis_output += "\n"
+
+        else:
+            analysis_output += "No tasks found for analysis.\n"
+
+        return analysis_output
+
+    except Exception as e:
+        logger.error(f"Error creating constraint analysis: {e}")
+        return f"\n\n⚠️ **Constraint analysis unavailable:** {str(e)}\n"
+
+
 def draw_chat_page(debug: bool = False):
     logger.info(f"NEBIUS_MODEL: {nebius_model}")
     logger.info(f"NEBIUS_API_KEY: {'Set' if nebius_api_key else 'Not Set'}")
@@ -109,7 +418,14 @@ def draw_chat_page(debug: bool = False):
         _tool_assembler, _tool_processor = create_tool_call_handler(_mcp_client)
 
         # Create chat interface components
-        chatbot, msg, clear, stop, calendar_file = create_chat_interface()
+        (
+            chatbot,
+            msg,
+            clear,
+            stop,
+            calendar_file,
+            constraint_analysis,
+        ) = create_chat_interface()
 
         # Create parameter controls
         (
@@ -134,15 +450,22 @@ def draw_chat_page(debug: bool = False):
                 temperature_slider,
                 top_p_slider,
             ],
-            [chatbot, msg, stop],
+            [chatbot, msg, stop, constraint_analysis],
             show_progress=True,
         )
 
         # Handle clear button
         def clear_chat():
-            return [], gr.update(interactive=True), gr.update(visible=False)
+            return (
+                [],  # Clear chatbot
+                gr.update(interactive=True),  # Enable msg input
+                gr.update(visible=False),  # Hide stop button
+                "## 🧠 **Constraint Analysis**\n\n*Schedule a task to see constraint analysis...*",  # Reset constraint analysis
+            )
 
-        clear.click(clear_chat, None, [chatbot, msg, stop], queue=False)
+        clear.click(
+            clear_chat, None, [chatbot, msg, stop, constraint_analysis], queue=False
+        )
 
         # Handle stop button
         def stop_processing():
@@ -154,39 +477,51 @@ def draw_chat_page(debug: bool = False):
 
 
 def create_chat_interface() -> tuple[
-    gr.Chatbot, gr.Textbox, gr.Button, gr.Button, gr.File
+    gr.Chatbot, gr.Textbox, gr.Button, gr.Button, gr.File, gr.Markdown
 ]:
     """Create and return the chat interface components"""
-    chatbot = gr.Chatbot(type="messages")
 
-    # Message input row with calendar upload on the right - improved layout
-    with gr.Row(equal_height=True):
-        msg = gr.Textbox(
-            label="Insert a task description",
-            placeholder="Ex.: Create a new EC2 instance on AWS",
-            interactive=True,
-            scale=5,  # Takes up most of the row
-            container=True,
-            lines=1,
-            max_lines=3,
-        )
-        calendar_file = gr.File(
-            label="📅 Calendar",
-            file_types=[".ics"],
-            visible=True,
-            scale=1,  # Compact size
-            height=80,  # Larger height to accommodate content
-            file_count="single",
-            container=True,
-            elem_id="calendar-upload",
-        )
+    # Create main layout with chat on left and analysis on right
+    with gr.Row():
+        # Left column - Chat interface
+        with gr.Column(scale=2):
+            chatbot = gr.Chatbot(type="messages", height=500)
 
-    # Control buttons row
+        # Right column - Constraint Analysis only
+        with gr.Column(scale=1):
+            constraint_analysis = gr.Markdown(
+                value="## 🧠 **Constraint Analysis**\n\n*Schedule a task to see constraint analysis...*",
+                label="Schedule Analysis",
+                container=True,
+                elem_id="constraint-analysis-panel",
+            )
+
+    # Calendar upload - spans full width, above message input
+    calendar_file = gr.UploadButton(
+        "📅 Upload Calendar (.ics) - Optional",
+        file_types=[".ics"],
+        file_count="single",
+        variant="secondary",
+        size="md",
+        elem_id="calendar-upload",
+    )
+
+    # Message input row - spans full width
+    msg = gr.Textbox(
+        label="Insert a task description",
+        placeholder="Ex.: Create a new EC2 instance on AWS",
+        interactive=True,
+        container=True,
+        lines=1,
+        max_lines=3,
+    )
+
+    # Control buttons row - spans full width
     with gr.Row():
         clear = gr.Button("Clear", variant="secondary")
         stop = gr.Button("Stop", variant="stop", visible=False)
 
-    return chatbot, msg, clear, stop, calendar_file
+    return chatbot, msg, clear, stop, calendar_file, constraint_analysis
 
 
 def create_chatbot_parameters() -> tuple[gr.Textbox, gr.Slider, gr.Slider, gr.Slider]:
@@ -259,7 +594,12 @@ def user_message(message, history, calendar_file_obj):
 
 def bot_response(history, system_message, max_tokens, temperature, top_p):
     if not history:
-        return history, gr.update(interactive=True), gr.update(visible=False)
+        return (
+            history,
+            gr.update(interactive=True),
+            gr.update(visible=False),
+            "## 🧠 **Constraint Analysis**\n\n*Schedule a task to see constraint analysis...*",
+        )
 
     # Convert messages format to tuples for the respond function
     history_tuples = []
@@ -277,6 +617,9 @@ def bot_response(history, system_message, max_tokens, temperature, top_p):
 
     logger.info(f"Bot response called with user message: {user_msg[:100]}...")
 
+    # Store the latest constraint analysis to return
+    latest_constraint_analysis = "## 🧠 **Constraint Analysis**\n\n*Processing...*"
+
     try:
         # Get the response generator
         response_gen = respond(
@@ -289,13 +632,15 @@ def bot_response(history, system_message, max_tokens, temperature, top_p):
         )
 
         # Stream responses to show progress - this is a generator function now
-        for response_chunk in response_gen:
+        for response_chunk, constraint_analysis_chunk in response_gen:
             updated_history = history.copy()
             updated_history[-1] = {"role": "assistant", "content": response_chunk}
+            latest_constraint_analysis = constraint_analysis_chunk
             yield (
                 updated_history,
                 gr.update(),  # Keep input disabled during processing
                 gr.update(),  # Keep stop button visible
+                constraint_analysis_chunk,  # Update constraint analysis panel
             )
 
         # Final yield to re-enable input and hide stop button
@@ -305,6 +650,7 @@ def bot_response(history, system_message, max_tokens, temperature, top_p):
             final_history,
             gr.update(interactive=True),  # Re-enable input
             gr.update(visible=False),  # Hide stop button
+            latest_constraint_analysis,  # Final constraint analysis
         )
 
     except Exception as e:
@@ -318,6 +664,7 @@ def bot_response(history, system_message, max_tokens, temperature, top_p):
             error_history,
             gr.update(interactive=True),  # Re-enable input on error
             gr.update(visible=False),  # Hide stop button on error
+            "## 🧠 **Constraint Analysis**\n\n❌ **Error occurred during analysis**",  # Error state for constraint analysis
         )
 
 
@@ -328,7 +675,7 @@ def respond(
     max_tokens,
     temperature,
     top_p,
-) -> Generator[str, None, None]:
+) -> Generator[tuple[str, str], None, None]:
     try:
         # Start capturing logs for this session
         start_session_logging()
@@ -410,14 +757,21 @@ def respond(
 
         if response.status_code != 200:
             logger.error(f"API error: {response.status_code} - {response.text}")
-            yield f"Error: API returned {response.status_code}: {response.text}"
+            yield (
+                f"Error: API returned {response.status_code}: {response.text}",
+                "## 🧠 **Constraint Analysis**\n\n❌ **API Error**",
+            )
             return
 
         response_text = ""
+        constraint_analysis_text = "## 🧠 **Constraint Analysis**\n\n*Processing...*"
 
         # Initial yield to show streaming is working
         if is_scheduling_request:
-            yield "🤖 **Processing your scheduling request...**"
+            yield (
+                "🤖 **Processing your scheduling request...**",
+                constraint_analysis_text,
+            )
 
         for line in response.iter_lines():
             if line:
@@ -451,13 +805,16 @@ def respond(
                                             f"  {log}" for log in latest_logs
                                         )
 
-                                        yield response_text + f"\n\n{logs_text}"
+                                        yield (
+                                            response_text + f"\n\n{logs_text}",
+                                            constraint_analysis_text,
+                                        )
 
                                     else:
-                                        yield response_text
+                                        yield (response_text, constraint_analysis_text)
 
                                 else:
-                                    yield response_text
+                                    yield (response_text, constraint_analysis_text)
 
                             # Process tool calls using our new handler
                             _tool_assembler.process_delta(delta)
@@ -475,14 +832,31 @@ def respond(
 
         if completed_tool_calls:
             logger.info(f"Processing {len(completed_tool_calls)} completed tool calls")
-            yield response_text + "\n\n🔧 **Processing scheduling request...**"
+            yield (
+                response_text + "\n\n🔧 **Processing scheduling request...**",
+                constraint_analysis_text,
+            )
 
             # Process tool calls using our new processor
             tool_response = _tool_processor.process_tool_calls(
                 completed_tool_calls, message
             )
             response_text += tool_response
-            yield response_text
+
+            # Extract constraint analysis from tool response if present
+            if "🧠 **Constraint Analysis**" in tool_response:
+                # Split the response to separate chat content from constraint analysis
+                parts = tool_response.split("## 🧠 **Constraint Analysis**")
+                if len(parts) > 1:
+                    chat_content = parts[0]
+                    analysis_content = "## 🧠 **Constraint Analysis**" + parts[1]
+                    # Clean up any duplicate analysis sections
+                    if "<details>" in analysis_content:
+                        analysis_content = analysis_content.split("<details>")[0]
+                    constraint_analysis_text = analysis_content.strip()
+                    response_text = response_text.replace(tool_response, chat_content)
+
+            yield (response_text, constraint_analysis_text)
 
         else:
             logger.info("No completed tool calls found")
@@ -494,7 +868,11 @@ def respond(
                 # Log detailed debug info for troubleshooting
                 logger.error(f"Tool assembly debug info: {debug_info}")
 
-                yield response_text + "\n\n⚠️ **Scheduling request detected but tool not triggered or incomplete. Let me try calling the scheduler directly...**"
+                yield (
+                    response_text
+                    + "\n\n⚠️ **Scheduling request detected but tool not triggered or incomplete. Let me try calling the scheduler directly...**",
+                    constraint_analysis_text,
+                )
 
                 # Directly call the scheduling tool as fallback
                 try:
@@ -527,7 +905,11 @@ def respond(
                             f"  {log}" for log in latest_logs
                         )
 
-                    yield response_text + f"\n\n🔧 **Direct scheduling call for: {task_description}**\n⏳ *Processing...*{processing_status}"
+                    yield (
+                        response_text
+                        + f"\n\n🔧 **Direct scheduling call for: {task_description}**\n⏳ *Processing...*{processing_status}",
+                        constraint_analysis_text,
+                    )
 
                     logger.info("About to call MCP scheduling tool directly")
 
@@ -559,7 +941,11 @@ def respond(
                             f"  {log}" for log in latest_logs
                         )
 
-                    yield response_text + f"\n\n🔧 **Direct scheduling call for: {task_description}**\n⏳ *Analyzing calendar and generating tasks...*{analysis_status}"
+                    yield (
+                        response_text
+                        + f"\n\n🔧 **Direct scheduling call for: {task_description}**\n⏳ *Analyzing calendar and generating tasks...*{analysis_status}",
+                        constraint_analysis_text,
+                    )
 
                     try:
                         result = call_with_timeout()
@@ -570,10 +956,14 @@ def respond(
                         tool_response = f"\n\n⏰ **Scheduling timed out** - The request took longer than expected. Please try with a simpler task description."
                         response_text += tool_response
                         logger.info("Added timeout message to response")
-                        yield response_text
+                        yield (response_text, constraint_analysis_text)
                     else:
                         # Show progress for result processing
-                        yield response_text + f"\n\n🔧 **Direct scheduling call for: {task_description}**\n⏳ *Processing results...*"
+                        yield (
+                            response_text
+                            + f"\n\n🔧 **Direct scheduling call for: {task_description}**\n⏳ *Processing results...*",
+                            constraint_analysis_text,
+                        )
 
                         logger.info(
                             f"MCP tool completed with status: {result.get('status', 'unknown')}"
@@ -741,6 +1131,11 @@ def respond(
                                 )
 
                                 # Add JSON data section for debugging
+                                # Generate constraint analysis separately
+                                constraint_analysis_text = create_constraint_analysis(
+                                    result
+                                )
+
                                 table_md += f"\n\n<details>\n<summary>📋 **Raw JSON Data** (click to expand)</summary>\n\n"
                                 table_md += "```json\n"
                                 table_md += safe_json_dumps(result)
@@ -757,7 +1152,14 @@ def respond(
                                 **Total Scheduled Items:** {len(schedule)}
 
                                 ⚠️ **No schedule items to display** - This may indicate the task was completed or no scheduling was needed.
+                                """
 
+                                # Generate constraint analysis separately for empty schedules
+                                constraint_analysis_text = create_constraint_analysis(
+                                    result
+                                )
+
+                                tool_response += f"""
                                 **Raw Result:**
                                 ```json
                                 {safe_json_dumps(result, indent=2)[:1000]}
@@ -766,7 +1168,7 @@ def respond(
 
                             response_text += tool_response
                             logger.info("Added success message with table to response")
-                            yield response_text
+                            yield (response_text, constraint_analysis_text)
                         else:
                             logger.warning(f"SUCCESS CONDITION NOT MET")
                             error_msg = result.get(
@@ -776,7 +1178,7 @@ def respond(
                             tool_response = f"\n\n❌ **Scheduling Error:** {error_msg}"
                             response_text += tool_response
                             logger.info("Added error message to response")
-                            yield response_text
+                            yield (response_text, constraint_analysis_text)
 
                 except Exception as e:
                     logger.error(f"Direct scheduling call failed: {e}")
@@ -785,14 +1187,17 @@ def respond(
                     tool_response = f"\n\n❌ **Scheduling failed:** {str(e)}"
                     response_text += tool_response
                     logger.info("Added exception message to response")
-                    yield response_text
+                    yield (response_text, constraint_analysis_text)
 
         # Always yield final response
         logger.info(f"Final yield: response length {len(response_text)}")
-        yield response_text
+        yield (response_text, constraint_analysis_text)
 
     except Exception as e:
         logger.error(f"Error in chat response: {e}")
 
         logger.error(f"Full traceback: {traceback.format_exc()}")
-        yield f"Error: {str(e)}"
+        yield (
+            f"Error: {str(e)}",
+            "## 🧠 **Constraint Analysis**\n\n❌ **Error occurred during processing**",
+        )

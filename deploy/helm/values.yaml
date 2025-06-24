@@ -1,0 +1,90 @@
+# Default values for yuga-planner.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Application configuration
+app:
+  name: yuga-planner
+
+# Image configuration
+image:
+  repository: ghcr.io/blackopsrepl/yuga-planner-test
+  tag: latest
+  pullPolicy: Always
+
+# Service configuration
+service:
+  type: NodePort
+  port: 80
+  targetPort: 7860
+  nodePort: 30860
+  protocol: TCP
+
+# Container configuration
+container:
+  port: 7860
+  name: http
+
+# Resource configuration
+resources:
+  requests:
+    memory: "512Mi"
+    cpu: "250m"
+  limits:
+    memory: "2Gi"
+    cpu: "1000m"
+
+# Deployment configuration
+deployment:
+  replicas: 1
+  command: ["python", "src/app.py"]
+  args:
+    - "--server-name"
+    - "0.0.0.0"
+    - "--server-port"
+    - "7860"
+
+# Health check configuration
+probes:
+  liveness:
+    httpGet:
+      path: /
+      port: 7860
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    httpGet:
+      path: /
+      port: 7860
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+    - ALL
+
+# Environment configuration
+env:
+  java:
+    home: "/usr/lib/jvm/temurin-21-jdk-amd64"
+    path: "/usr/lib/jvm/temurin-21-jdk-amd64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# Secret configuration (values will be populated from environment variables during deployment)
+secrets:
+  nebiusApiKey: "${NEBIUS_API_KEY}"
+  nebiusModel: "${NEBIUS_MODEL}"
+  modalTokenId: "${MODAL_TOKEN_ID}"
+  modalTokenSecret: "${MODAL_TOKEN_SECRET}"
+  hfModel: "${HF_MODEL}"
+  hfToken: "${HF_TOKEN}"

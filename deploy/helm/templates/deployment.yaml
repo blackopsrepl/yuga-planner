@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.app.name }}
+  labels:
+    app: {{ .Values.app.name }}
+{{- include "yuga-planner.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.deployment.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.app.name }}
+{{- include "yuga-planner.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.app.name }}
+{{- include "yuga-planner.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+      - name: {{ .Values.app.name }}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.container.port }}
+          name: {{ .Values.container.name }}
+          protocol: {{ .Values.service.protocol }}
+        env:
+        - name: JAVA_HOME
+          valueFrom:
+            configMapKeyRef:
+              name: {{ .Values.app.name }}-config
+              key: JAVA_HOME
+        - name: PATH
+          valueFrom:
+            configMapKeyRef:
+              name: {{ .Values.app.name }}-config
+              key: PATH
+        - name: NEBIUS_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.app.name }}-secrets
+              key: NEBIUS_API_KEY
+        - name: NEBIUS_MODEL
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.app.name }}-secrets
+              key: NEBIUS_MODEL
+        - name: MODAL_TOKEN_ID
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.app.name }}-secrets
+              key: MODAL_TOKEN_ID
+        - name: MODAL_TOKEN_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.app.name }}-secrets
+              key: MODAL_TOKEN_SECRET
+        - name: HF_MODEL
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.app.name }}-secrets
+              key: HF_MODEL
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.app.name }}-secrets
+              key: HF_TOKEN
+        command: {{ .Values.deployment.command | toJson }}
+        args:
+{{- range .Values.deployment.args }}
+        - {{ . | quote }}
+{{- end }}
+        resources:
+{{- toYaml .Values.resources | nindent 10 }}
+        livenessProbe:
+{{- toYaml .Values.probes.liveness | nindent 10 }}
+        readinessProbe:
+{{- toYaml .Values.probes.readiness | nindent 10 }}
+        securityContext:
+{{- toYaml .Values.securityContext | nindent 10 }}

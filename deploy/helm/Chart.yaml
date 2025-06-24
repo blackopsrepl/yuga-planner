@@ -1,0 +1,13 @@
+apiVersion: v2
+name: yuga-planner
+description: A Helm chart for Yuga Planner application
+type: application
+version: 0.1.0
+appVersion: "latest"
+maintainers:
+  - name: Yuga Planner Team
+keywords:
+  - planner
+  - ai
+  - application
+home: https://github.com/blackopsrepl/yuga-planner

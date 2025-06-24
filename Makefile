@@ -1,4 +1,4 @@
-.PHONY: help venv install run test lint format clean setup-secrets deploy-k8s
+.PHONY: help venv install run test lint format clean setup-secrets check-creds deploy-k8s deploy-helm cleanup-k8s cleanup-helm
 
 PYTHON=python
 PIP=pip
@@ -15,7 +15,11 @@ help:
 	@echo "  lint            Run pre-commit hooks (includes black, yaml, gitleaks)"
 	@echo "  format          Format code with black"
 	@echo "  setup-secrets   Copy and edit secrets template for local dev"
+	@echo "  check-creds     Check and validate all required credentials"
 	@echo "  deploy-k8s      Deploy application to Kubernetes"
+	@echo "  deploy-helm     Deploy application using Helm"
+	@echo "  cleanup-k8s     Clean up Kubernetes deployment"
+	@echo "  cleanup-helm    Clean up Helm deployment"
 	@echo "  clean           Remove Python cache and virtual environment"
 
 venv:
@@ -42,8 +46,21 @@ setup-secrets:
 	cp -n tests/secrets/nebius_secrets.py.template tests/secrets/cred.py; \
 	echo "Edit tests/secrets/cred.py to add your own API credentials."
 
+check-creds:
+	@echo "🔍 Checking credentials..."
+	@./scripts/load-credentials.sh
+
 deploy-k8s:
 	./scripts/deploy-k8s.sh
+
+deploy-helm:
+	./scripts/deploy-helm.sh
+
+cleanup-k8s:
+	./scripts/cleanup-k8s.sh
+
+cleanup-helm:
+	./scripts/cleanup-helm.sh
 
 clean:
 	rm -rf $(VENV) __pycache__ */__pycache__ .pytest_cache .mypy_cache .coverage .hypothesis

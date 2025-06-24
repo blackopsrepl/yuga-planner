@@ -1,0 +1,36 @@
+1. Get the application URL by running these commands:
+{{- if eq .Values.service.type "NodePort" }}
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ .Values.app.name }}-service)
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo http://$NODE_IP:$NODE_PORT
+{{- else if eq .Values.service.type "LoadBalancer" }}
+     NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+           You can watch the status of by running 'kubectl get --namespace {{ .Release.Namespace }} svc -w {{ .Values.app.name }}-service'
+  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ .Values.app.name }}-service --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
+  echo http://$SERVICE_IP:{{ .Values.service.port }}
+{{- else if eq .Values.service.type "ClusterIP" }}
+  export POD_NAME=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "yuga-planner.name" . }},app.kubernetes.io/instance={{ .Release.Name }}" -o jsonpath="{.items[0].metadata.name}")
+  export CONTAINER_PORT=$(kubectl get pod --namespace {{ .Release.Namespace }} $POD_NAME -o jsonpath="{.spec.containers[0].ports[0].containerPort}")
+  echo "Visit http://127.0.0.1:8080 to use your application"
+  kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8080:$CONTAINER_PORT
+{{- end }}
+
+2. Check the deployment status:
+  kubectl get deployments {{ .Values.app.name }} -n {{ .Release.Namespace }}
+
+3. View the pods:
+  kubectl get pods -l app={{ .Values.app.name }} -n {{ .Release.Namespace }}
+
+4. Check the logs:
+  kubectl logs -l app={{ .Values.app.name }} -n {{ .Release.Namespace }} -f
+
+Note: Make sure to set the required environment variables before deployment:
+- NEBIUS_API_KEY
+- NEBIUS_MODEL
+- MODAL_TOKEN_ID
+- MODAL_TOKEN_SECRET
+- HF_MODEL
+- HF_TOKEN
+
+You can substitute these values using envsubst before installation:
+  envsubst < values.yaml | helm install yuga-planner ./helm --values -

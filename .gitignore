@@ -128,3 +128,4 @@ dmypy.json
 tests/secrets/nebius_secrets.py
 
 tests/secrets/creds.py
+dag_plot.png
